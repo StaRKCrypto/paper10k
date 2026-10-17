@@ -23,10 +23,11 @@ contract ExchangeTest is Base {
     function test_liquidation_at_10000x_mints_px_and_feeds_insurance() public {
         vm.prank(alice); uint256 id = ex.open(BTC, true, 10e6, 10_000, P0);
         orc.set(BTC, P0 - P0 * 8 / 100_000);
-        vm.expectRevert(Paper10kExchange.NotLiquidatable.selector); ex.liquidate(id);
+        vm.expectRevert(Paper10kExchange.MarkNotReady.selector); ex.liquidate(id);
+        ex.markLiquidatable(id); assertEq(_markBlock(id), 0); // not busted -> no mark
         orc.set(BTC, P0 - P0 * 10 / 100_000);
         uint256 poolBefore = ex.pool();
-        vm.prank(keeper); ex.liquidate(id);
+        _liq(id, keeper);
         assertEq(ex.insurance(), 1e6);                 // 10% of 10
         assertEq(ex.pool(), poolBefore + 9e6);
         assertEq(x.balanceOf(alice), 10e6 * 1e12 * 100);
@@ -88,7 +89,7 @@ contract ExchangeTest is Base {
         uint256 q = ex.queuedOf(alice); assertGt(q, 0); assertEq(ex.queuedTotal(), q);
         vm.prank(bob); uint256 id2 = ex.open(BTC, true, 500e6, 100, type(uint256).max);
         _next(); orc.set(BTC, orc.px(BTC) * 99 / 100);
-        vm.prank(bob); ex.liquidate(id2);
+        _liq(id2, bob);
         ex.processQueue(10);
         assertLt(ex.queuedOf(alice), q);
         _solvent();

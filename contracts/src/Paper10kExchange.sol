@@ -8,6 +8,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IPriceOracle} from "./IPriceOracle.sol";
+import {ILiquidationOracle} from "./ILiquidationOracle.sol";
 import {Paper10kX} from "./Paper10kX.sol";
 
 /// @title Paper10kExchange (v2)
@@ -74,6 +75,16 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     uint256 public nextPositionId = 1;
     mapping(uint256 => Position) public positions;
 
+    // ---------------------------------------------------------------- v4: liquidation persistence (F5) + reserved liability (F7)
+    uint32 public constant MARK_MIN_BLOCKS = 2;   // liquidate() only >= 2 blocks after markLiquidatable()
+    uint64 public constant MARK_TTL = 120;        // a mark expires; a stale mark cannot be used for a later, unrelated dip
+    struct Mark { uint32 blockNo; uint64 ts; }
+    mapping(uint256 => Mark) public marks;
+    /// per-market worst-case payout of open positions (margin * maxProfitMult of the params version it opened under), by side
+    mapping(uint32 => uint256) public liabLong;
+    mapping(uint32 => uint256) public liabShort;
+    uint32[] public marketIds;
+
     // ---------------------------------------------------------------- accounting
     mapping(address => uint256) public free;
     uint256 public totalFree;
@@ -98,6 +109,8 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     event Opened(uint256 indexed id, address indexed user, uint32 market, bool isLong, uint256 margin, uint256 notional, uint256 entry, uint32 leverage);
     event Closed(uint256 indexed id, address indexed user, uint256 exitPrice, uint256 returned, uint256 profitPaid, uint256 profitQueued, uint256 loss);
     event Liquidated(uint256 indexed id, address indexed user, address indexed keeper, uint256 price, uint256 margin, uint256 minted);
+    event Marked(uint256 indexed id, address indexed by, uint256 price);
+    event MarkCleared(uint256 indexed id);
     event EmergencyCancelled(uint256 indexed id, address indexed user, uint256 margin);
     event QueuePaid(address indexed user, uint256 amount);
     event ConfigProposed(uint64 effectiveAt);
@@ -114,7 +127,7 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
 
     error BadParam(); error NotListed(); error MarketClosed(); error Leverage(); error Margin(); error Cap();
     error PriceBad(); error Slippage(); error NotOwnerOfPosition(); error TooSoon(); error NotLiquidatable();
-    error InsufficientFree(); error TransferMismatch(); error NotEmergency(); error NotGuardian(); error Delay(); error NothingPending();
+    error MarkNotReady(); error StillBusted(); error Reserved(); error InsufficientFree(); error TransferMismatch(); error NotEmergency(); error NotGuardian(); error Delay(); error NothingPending();
 
     constructor(
         address owner_, IERC20 collateral_, uint8 collateralDecimals, Paper10kX px_, IPriceOracle oracle_,
@@ -171,6 +184,7 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         else { m.oiShort += notional; if (m.oiShort > m.oiCapShort) revert Cap(); }
 
         free[msg.sender] -= margin; totalFree -= margin; totalMargin += margin;
+        if (isLong) liabLong[market] += margin * pr.maxProfitMult; else liabShort[market] += margin * pr.maxProfitMult;
         id = nextPositionId++;
         positions[id] = Position(msg.sender, market, uint16(leverage), pv, isLong, uint128(margin), uint128(notional), uint128(price), uint64(block.timestamp), uint32(block.number));
         emit Opened(id, msg.sender, market, isLong, margin, notional, price, leverage);
@@ -183,7 +197,10 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         if (block.timestamp < p.openedAt + ops.minHold || block.number <= p.openedBlock) revert TooSoon();
         Params memory pr = paramsHistory[p.pv];
         uint256 price = _price(p.market);
-        if (_busted(p, pr, price)) { _liquidate(id, p, pr, price, msg.sender); return; }
+        // v4: a hard bust on voluntary close needs the multi-source liquidation price to agree. If it is unavailable (F8) or does not agree,
+        // the close proceeds at the primary price; a position past maintenance then simply realises its (capped) loss.
+        (bool lok, uint256 lp) = _liqPrice(p);
+        if (lok && _busted(p, pr, lp)) { _liquidate(id, p, pr, lp, msg.sender); return; }
         _removePosition(id, p);
         (bool win, uint256 amt) = _pnl(p, pr, price);
         totalMargin -= p.margin;
@@ -198,13 +215,53 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         }
     }
 
+    /// @dev multi-source price for liquidation decisions; (false,0) if unavailable (fails closed)
+    function _liqPrice(Position memory p) internal view returns (bool ok, uint256 price) {
+        uint64 ts;
+        try ILiquidationOracle(address(oracle)).getLiquidationPrice(p.market, p.isLong) returns (uint256 pr_, uint64 ts_) { price = pr_; ts = ts_; }
+        catch { return (false, 0); }
+        if (price == 0 || price > type(uint128).max || ts == 0 || ts + ops.maxPriceAge < block.timestamp || ts > block.timestamp + 10) return (false, 0);
+        ok = true;
+    }
+
+    /// @notice step 1 (permissionless): record that the position is past its bust price by the MULTI-SOURCE liquidation price.
+    ///         If it is not (price recovered) any existing mark is cleared. A still-valid mark is never refreshed (earliest wins).
+    function markLiquidatable(uint256 id) external nonReentrant whenNotPaused {
+        Position memory p = positions[id];
+        if (p.owner == address(0)) revert NotLiquidatable();
+        (bool ok, uint256 lp) = _liqPrice(p);
+        if (!ok) revert PriceBad();
+        if (!_busted(p, paramsHistory[p.pv], lp)) {
+            if (marks[id].blockNo != 0) { delete marks[id]; emit MarkCleared(id); }
+            return;
+        }
+        Mark memory m = marks[id];
+        if (m.blockNo != 0 && block.timestamp <= m.ts + MARK_TTL) return;
+        marks[id] = Mark(uint32(block.number), uint64(block.timestamp));
+        emit Marked(id, msg.sender, lp);
+    }
+
+    /// @notice permissionless: drop a mark once the multi-source price has recovered (anyone, incl. the owner, can protect a position this way)
+    function clearMark(uint256 id) external nonReentrant {
+        Position memory p = positions[id];
+        if (p.owner == address(0) || marks[id].blockNo == 0) revert NotLiquidatable();
+        (bool ok, uint256 lp) = _liqPrice(p);
+        if (!ok) revert PriceBad();
+        if (_busted(p, paramsHistory[p.pv], lp)) revert StillBusted();
+        delete marks[id]; emit MarkCleared(id);
+    }
+
+    /// @notice step 2: >= MARK_MIN_BLOCKS after the mark (and within MARK_TTL) AND still busted now by the multi-source price.
     function liquidate(uint256 id) external nonReentrant whenNotPaused {
         Position memory p = positions[id];
         if (p.owner == address(0)) revert NotLiquidatable();
+        Mark memory m = marks[id];
+        if (m.blockNo == 0 || block.number < uint256(m.blockNo) + MARK_MIN_BLOCKS || block.timestamp > m.ts + MARK_TTL) revert MarkNotReady();
         Params memory pr = paramsHistory[p.pv];
-        uint256 price = _price(p.market);
-        if (!_busted(p, pr, price)) revert NotLiquidatable();
-        _liquidate(id, p, pr, price, msg.sender);
+        (bool ok, uint256 lp) = _liqPrice(p);
+        if (!ok) revert PriceBad();
+        if (!_busted(p, pr, lp)) revert NotLiquidatable();
+        _liquidate(id, p, pr, lp, msg.sender);
     }
 
     function _liquidate(uint256 id, Position memory p, Params memory pr, uint256 price, address keeper) internal {
@@ -218,7 +275,9 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     function _removePosition(uint256 id, Position memory p) internal {
         Market storage m = markets[p.market];
         if (p.isLong) m.oiLong -= p.notional; else m.oiShort -= p.notional;
-        delete positions[id];
+        uint256 l = uint256(p.margin) * paramsHistory[p.pv].maxProfitMult;
+        if (p.isLong) liabLong[p.market] -= l; else liabShort[p.market] -= l;
+        delete positions[id]; delete marks[id];
     }
 
     /// @dev forfeited trader funds: `insBps` to the insurance fund, rest to the pool
@@ -269,6 +328,19 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     // ================================================================ views
+    /// @notice worst-case payout the house could owe if the price moved fully in one direction on every market at once:
+    ///         per market the larger side's sum of (margin * maxProfitMult); summed over markets (cross-market correlation assumed).
+    function reservedLiability() public view returns (uint256 r) {
+        for (uint256 i = 0; i < marketIds.length; i++) {
+            uint32 id = marketIds[i]; uint256 a = liabLong[id]; uint256 b = liabShort[id];
+            r += a > b ? a : b;
+        }
+    }
+    /// @notice how much house capital (pool+insurance) the owner could withdraw right now ignoring the delay
+    function ownerWithdrawable() external view returns (uint256) {
+        uint256 cash = pool + insurance; uint256 r = reservedLiability();
+        return queuedTotal != 0 || cash <= r ? 0 : cash - r;
+    }
     function paramsVersion() external view returns (uint256) { return paramsHistory.length - 1; }
     function currentParams() external view returns (Params memory) { return paramsHistory[paramsHistory.length - 1]; }
 
@@ -284,7 +356,9 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     function previewClose(uint256 id) external view returns (bool busted, bool win, uint256 amount, uint256 price) {
         Position memory p = positions[id]; require(p.owner != address(0), "none");
         Params memory pr = paramsHistory[p.pv];
-        price = _price(p.market); busted = _busted(p, pr, price);
+        price = _price(p.market);
+        (bool lok, uint256 lp) = _liqPrice(p);
+        busted = lok && _busted(p, pr, lp);
         if (!busted) (win, amount) = _pnl(p, pr, price);
     }
 
@@ -358,6 +432,7 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         if (!pm.set) revert NothingPending();
         if (block.timestamp < pm.at) revert Delay();
         Market storage m = markets[id];
+        if (!m.listed) marketIds.push(id);
         m.listed = true; m.open = pm.open; m.oiCapLong = pm.capLong; m.oiCapShort = pm.capShort;
         delete pendingMarket[id];
         emit MarketSet(id, pm.open, pm.capLong, pm.capShort);
@@ -392,6 +467,7 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         if (block.timestamp < w.at) revert Delay();
         delete pendingWithdraw;
         if (queuedTotal != 0) revert Cap(); // never while winners are owed
+        if (pool + insurance - (w.fromInsurance ? Math.min(w.amount, insurance) : Math.min(w.amount, pool)) < reservedLiability()) revert Reserved(); // v4 F7
         if (w.fromInsurance) { if (w.amount > insurance) revert Cap(); insurance -= w.amount; }
         else { if (w.amount > pool) revert Cap(); pool -= w.amount; }
         collateral.safeTransfer(w.to, w.amount);

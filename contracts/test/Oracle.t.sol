@@ -52,6 +52,39 @@ contract HyperCoreOracleTest is Base {
         r.set(100_000e18, uint64(block.timestamp - 31)); (p,) = h.getPrice(0); assertEq(p, 0); // stale reference
         r.set(0, 0); (p,) = h.getPrice(0); assertEq(p, 0);
     }
+    // ---- v4: getLiquidationPrice (multi-source)
+    function test_liqPriceTwoSourcesIsConservative() public {
+        bbo.set(1_000_000, 1_000_010); opx.set(1_000_005);                 // mid 1_000_005 == oraclePx
+        (uint256 pl,) = h.getLiquidationPrice(0, true); assertEq(pl, 1_000_005 * 1e17);
+        bbo.set(1_000_040, 1_000_050); opx.set(1_000_005);                 // BBO nudged UP ~4.5e-5; oraclePx unchanged
+        (pl,) = h.getLiquidationPrice(0, true);  assertEq(pl, 1_000_045 * 1e17);   // long: max(s1,s2) = favourable to the long
+        (uint256 ps,) = h.getLiquidationPrice(0, false); assertEq(ps, 1_000_005 * 1e17); // short: min => oraclePx
+        bbo.set(999_960, 999_970);                                           // nudged DOWN
+        (pl,) = h.getLiquidationPrice(0, true);  assertEq(pl, 1_000_005 * 1e17);   // long cannot be liquidated by a downward nudge alone
+        (ps,) = h.getLiquidationPrice(0, false); assertEq(ps, 999_965 * 1e17);
+    }
+    function test_liqPriceMedianWithRef() public {
+        MockRef r = new MockRef();
+        vm.prank(owner); h.setGuards(30, 100, IPriceOracle(address(r)), 100, 30);
+        opx.set(1_000_005); r.set(100_000.5e18, uint64(block.timestamp));
+        bbo.set(1_000_040, 1_000_050);                                       // only the BBO is nudged (+4.5e-5)
+        (uint256 pl,) = h.getLiquidationPrice(0, true);  assertEq(pl, 100_000.5e18);   // median = the two honest sources
+        (uint256 ps,) = h.getLiquidationPrice(0, false); assertEq(ps, 100_000.5e18);
+        bbo.set(999_960, 999_970);
+        (pl,) = h.getLiquidationPrice(0, true); assertEq(pl, 100_000.5e18);
+    }
+    function test_liqPriceFailsClosed() public {
+        bbo.set(1_000_000, 1_100_000); (uint256 p,) = h.getLiquidationPrice(0, true); assertEq(p, 0);       // wide book
+        bbo.set(1_000_000, 1_000_010); opx.set(0); (p,) = h.getLiquidationPrice(0, true); assertEq(p, 0);   // no oraclePx
+        opx.set(1_000_005); bbo.setFail(true); (p,) = h.getLiquidationPrice(0, true); assertEq(p, 0);
+        bbo.setFail(false); (p,) = h.getLiquidationPrice(9, true); assertEq(p, 0);                          // unconfigured
+        MockRef r = new MockRef();
+        vm.prank(owner); h.setGuards(30, 100, IPriceOracle(address(r)), 100, 30);
+        r.set(0, 0); (p,) = h.getLiquidationPrice(0, false); assertEq(p, 0);                                 // configured ref missing => closed
+        r.set(100_000e18, uint64(block.timestamp - 31)); (p,) = h.getLiquidationPrice(0, false); assertEq(p, 0); // stale ref
+        // getPrice (voluntary close path) is unaffected by the oraclePx/ref *agreement* beyond its own guards
+        r.set(100_000e18, uint64(block.timestamp)); (p,) = h.getPrice(0); assertGt(p, 0);
+    }
     function test_onlyOwnerConfig() public {
         vm.expectRevert(); h.configure(1, 1, 4);
         vm.expectRevert(); h.setGuards(30, 100, IPriceOracle(address(0)), 100, 30);
@@ -110,7 +143,7 @@ contract TokenTest is Base {
     function test_onlyMinterAndNonTransferable() public {
         vm.expectRevert(Paper10kX.NotMinter.selector); x.mint(alice, 1);
         vm.prank(alice); uint256 id = ex.open(0, true, 10e6, 10_000, P0);
-        orc.set(0, P0 / 2); ex.liquidate(id);
+        orc.set(0, P0 / 2); _liq(id, address(this));
         assertGt(x.balanceOf(alice), 0);
         vm.prank(alice); vm.expectRevert(Paper10kX.TransfersDisabled.selector); x.transfer(bob, 1);
         vm.prank(alice); x.burn(1);
@@ -126,7 +159,7 @@ contract TokenTest is Base {
         vm.prank(alice); uint256 id = ex.open(0, true, margin, lev, P0);
         orc.set(0, 1); // crash
         vm.warp(block.timestamp + 1); orc.set(0, 1);
-        ex.liquidate(id);
+        _liq(id, address(this));
         assertEq(x.balanceOf(alice), uint256(margin) * 1e12 * 100);
     }
 }

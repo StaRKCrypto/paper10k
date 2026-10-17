@@ -57,7 +57,7 @@ contract GovernanceTest is Base {
         // bust of B uses maint 50%: entry*(1-0.5/5)=0.9
         assertEq(ex.bustPriceOf(idB), P0 - P0 * 5000 / (10_000 * 5) * 1 );
         // liquidation of A still mints under OLD mint rate (100/1)
-        orc.set(BTC, P0 / 2); ex.liquidate(idA);
+        orc.set(BTC, P0 / 2); _liq(idA, address(this));
         assertEq(x.balanceOf(alice), 100e6 * 1e12 * 100);
     }
     function _previewWin(uint256 id) internal returns (bool, bool, uint256, uint256) {

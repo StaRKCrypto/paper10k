@@ -196,8 +196,9 @@ async function onClick(e) {
     }
     else if (a === 'close') {
       const p = data.positions.find((x) => String(x.id) === b.dataset.id), pr = data.prices[p.market].price;
-      const dead = p.isLong ? pr <= bust(p) : pr >= bust(p);
-      return tx(dead ? 'Liquidate' : 'Close', d.exchange, enc(dead ? SEL.liquidate : SEL.close, p.id));
+      // v4: liquidation is a permissionless 2-step (markLiquidatable, >=2 blocks, liquidate) priced by a multi-source oracle. The owner's own
+      // close() is always available and the contract decides: hard-bust if the multi-source price agrees, else the (capped) realised loss.
+      return tx('Close', d.exchange, enc(SEL.close, p.id));
     }
     render(); refresh();
   } catch (err) { toast(err?.message || String(err), true); }

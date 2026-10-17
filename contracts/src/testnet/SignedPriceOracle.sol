@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {IPriceOracle} from "../IPriceOracle.sol";
+import {ILiquidationOracle} from "../ILiquidationOracle.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -12,7 +13,7 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 ///         and may not jump more than `maxJumpBps` from the previous price (owner can `forcePrice` to reset).
 ///         TRUST: whoever holds `signer` controls prices. Use only on testnet, or behind a hardened signer
 ///         (multi-sig/threshold/HSM) with monitoring. See MAINNET_LAUNCH.md.
-contract SignedPriceOracle is IPriceOracle, Ownable2Step, EIP712 {
+contract SignedPriceOracle is IPriceOracle, ILiquidationOracle, Ownable2Step, EIP712 {
     bytes32 public constant PRICE_TYPEHASH = keccak256("Price(uint32 market,uint256 price,uint64 timestamp)");
 
     address public signer;
@@ -78,6 +79,9 @@ contract SignedPriceOracle is IPriceOracle, Ownable2Step, EIP712 {
     }
 
     function domainSeparator() external view returns (bytes32) { return _domainSeparatorV4(); }
+
+    /// @dev TESTNET ONLY: single source (the signer) — offers NO protection against a nudged price. Mainnet uses HyperCoreOracle.
+    function getLiquidationPrice(uint32 market, bool) external view returns (uint256, uint64) { return this.getPrice(market); }
 
     function getPrice(uint32 market) external view returns (uint256, uint64) {
         Px memory p = latest[market];

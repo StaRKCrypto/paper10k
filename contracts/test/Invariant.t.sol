@@ -33,7 +33,15 @@ contract Handler is Base {
         if (ids.length == 0) return; uint256 id = ids[i % ids.length]; address o = ex.positionOwner(id);
         vm.prank(o); try ex.close(id) { nClose++; } catch {} _settled(id);
     }
-    function liq(uint256 i) external { if (ids.length == 0) return; uint256 id = ids[i % ids.length]; try ex.liquidate(id) { nLiq++; } catch {} _settled(id); }
+    function liq(uint256 i) external { if (ids.length == 0) return; uint256 id = ids[i % ids.length]; try ex.markLiquidatable(id) {} catch {} vm.roll(block.number + 2); vm.warp(block.timestamp + 2); orc.set(0, orc.px(0)); try ex.liquidate(id) { nLiq++; } catch {} _settled(id); }
+    bool public badLiq; bool public ownerBreach;
+    function mark(uint256 i) external { if (ids.length == 0) return; try ex.markLiquidatable(ids[i % ids.length]) {} catch {} }
+    function nudge(int256 bps) external { bps = bound(bps, -50, 50); uint256 p = orc.px(0); orc.setLiq(0, uint256(int256(p) + int256(p) * bps / 10_000)); }
+    function liqEarly(uint256 i) external {
+        if (ids.length == 0) return; uint256 id = ids[i % ids.length];
+        (uint32 mb,) = ex.marks(id); uint256 bn = block.number;
+        try ex.liquidate(id) { if (mb == 0 || bn < uint256(mb) + 2) badLiq = true; nLiq++; } catch {} _settled(id);
+    }
     function q(uint256 n) external { ex.processQueue(bound(n, 1, 10)); }
     function fundIns(uint256 a) external { a = bound(a, 1e6, 100e6); usdc.mintTo(address(this), a); usdc.approve(address(ex), a); ex.fundInsurance(a); }
     function cfg(uint256 s) external {
@@ -46,7 +54,7 @@ contract Handler is Base {
     }
     function ownerWd(uint256 a, bool ins) external {
         a = bound(a, 1, 2_000e6);
-        vm.startPrank(owner); ex.proposeWithdraw(owner, a, ins); vm.warp(block.timestamp + DELAY); try ex.applyWithdraw() { nWd++; } catch {} vm.stopPrank();
+        vm.startPrank(owner); ex.proposeWithdraw(owner, a, ins); vm.warp(block.timestamp + DELAY); uint256 resB = ex.reservedLiability(); try ex.applyWithdraw() { nWd++; if (ex.pool() + ex.insurance() < resB) ownerBreach = true; } catch {} vm.stopPrank();
         vm.roll(block.number + 1); orc.set(0, orc.px(0));
     }
     function liveIds() external view returns (uint256[] memory) { return ids; }
@@ -61,9 +69,9 @@ contract InvariantTest is StdInvariant, Base {
         h.init(ex, orc, [alice, bob, address(0xC0C)], owner, address(usdc));
         _fund(address(0xC0C), 10_000e6);
         vm.prank(owner); // handler acts via pranks of users; give each user approvals (done in _fund)
-        bytes4[] memory sel = new bytes4[](10);
+        bytes4[] memory sel = new bytes4[](13);
         sel[0]=Handler.dep.selector; sel[1]=Handler.wd.selector; sel[2]=Handler.open.selector; sel[3]=Handler.mv.selector; sel[4]=Handler.pass.selector;
-        sel[5]=Handler.cls.selector; sel[6]=Handler.liq.selector; sel[7]=Handler.q.selector; sel[8]=Handler.cfg.selector; sel[9]=Handler.ownerWd.selector;
+        sel[5]=Handler.cls.selector; sel[6]=Handler.liq.selector; sel[7]=Handler.q.selector; sel[8]=Handler.cfg.selector; sel[9]=Handler.ownerWd.selector; sel[10]=Handler.mark.selector; sel[11]=Handler.nudge.selector; sel[12]=Handler.liqEarly.selector;
         targetSelector(FuzzSelector({addr: address(h), selectors: sel}));
         bytes4[] memory s2 = new bytes4[](1); s2[0] = Handler.fundIns.selector;
         targetSelector(FuzzSelector({addr: address(h), selectors: s2}));
@@ -101,4 +109,24 @@ contract InvariantTest is StdInvariant, Base {
     function invariant_versionMonotone() public view { assertGe(ex.paramsVersion(), h.maxVersionSeen()); }
     /// owner cannot drain: users' free balances + margins are always fully backed by cash
     function invariant_usersFullyBacked() public view { assertGe(usdc.balanceOf(address(ex)), ex.totalFree() + ex.totalMargin()); }
+    /// v4: liquidation never happens without a >=2-block-old mark
+    function invariant_noLiquidationWithoutPersistence() public view { assertFalse(h.badLiq()); }
+    /// v4: marks only exist for open positions
+    function invariant_marksOnlyForOpenPositions() public view {
+        uint256[] memory ids = h.liveIds();
+        for (uint256 i = 0; i < ids.length; i++) { if (ex.positionOwner(ids[i]) == address(0)) { (uint32 b,) = ex.marks(ids[i]); assertEq(b, 0); } }
+    }
+    /// v4: reserved liability equals the recomputed worst case (max side per market) from the open positions
+    function invariant_reservedLiabilityMatches() public view {
+        uint256[] memory ids = h.liveIds(); uint256 l; uint256 sh;
+        for (uint256 i = 0; i < ids.length; i++) {
+            (address o,,, uint32 pv, bool isLong, uint128 margin,,,,) = ex.positions(ids[i]);
+            if (o == address(0)) continue;
+            (,,,, uint16 mult,,,,,,) = ex.paramsHistory(pv);
+            if (isLong) l += uint256(margin) * mult; else sh += uint256(margin) * mult;
+        }
+        assertEq(ex.reservedLiability(), l > sh ? l : sh);
+    }
+    /// v4 F7: when owner withdrawals succeeded, house cash still covered the reserve at that time -> checked by Reserved(); here: cash never below reserve unless it was already below before (no owner-caused breach)
+    function invariant_ownerNeverCausedReserveBreach() public view { assertFalse(h.ownerBreach()); }
 }

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {IPriceOracle} from "./IPriceOracle.sol";
+import {ILiquidationOracle} from "./ILiquidationOracle.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @title HyperCoreOracle — pull-free oracle for HyperEVM (chain 998 testnet / 999 mainnet)
@@ -17,7 +18,7 @@ import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step
 /// @dev VERIFIED against live HyperEVM RPCs on 2026-10-17 (mainnet 999 + testnet 998): 0x…080e returns abi.encode(uint64 bid,uint64 ask)
 ///      for a uint input, 0x…0807 returns uint64; prices are scaled 10^(6 - szDecimals) (BTC szDecimals=5, ETH=4).
 ///      Precompiles revert on invalid assets; we staticcall and treat failure as "no price".
-contract HyperCoreOracle is IPriceOracle, Ownable2Step {
+contract HyperCoreOracle is IPriceOracle, ILiquidationOracle, Ownable2Step {
     address public immutable bboPrecompile;
     address public immutable oraclePxPrecompile;
 
@@ -129,14 +130,17 @@ contract HyperCoreOracle is IPriceOracle, Ownable2Step {
         return mid2;
     }
 
-    function _refOk(uint32 market, uint256 price) internal view returns (bool) {
+    function _refRead(uint32 market, uint256 price) internal view returns (bool ok, uint256 rp) {
         IPriceOracle ro = refOracle;
-        if (address(ro) == address(0)) return true;
-        (uint256 rp, uint64 rts) = ro.getPrice(market);
-        if (rp == 0 || rts + refMaxAge < block.timestamp || rts > block.timestamp + 10) return false;
+        if (address(ro) == address(0)) return (true, 0);
+        uint64 rts;
+        (rp, rts) = ro.getPrice(market);
+        if (rp == 0 || rts + refMaxAge < block.timestamp || rts > block.timestamp + 10) return (false, 0);
         uint256 dd = price > rp ? price - rp : rp - price;
-        return dd * 10_000 <= rp * maxRefDevBps;
+        ok = dd * 10_000 <= rp * maxRefDevBps;
     }
+
+    function _refOk(uint32 market, uint256 price) internal view returns (bool ok) { (ok,) = _refRead(market, price); }
 
     function getPrice(uint32 market) external view returns (uint256 price, uint64 updatedAt) {
         Mkt memory m = mkt[market];
@@ -146,5 +150,37 @@ contract HyperCoreOracle is IPriceOracle, Ownable2Step {
         price = mid2 * (10 ** (12 + m.szDec)) / 2;
         if (!_refOk(market, price)) return (0, 0);
         updatedAt = uint64(block.timestamp);
+    }
+
+    /// @notice v4 (F5): liquidation price that a single-source nudge cannot move.
+    ///   sources: s1 = guarded BBO mid, s2 = HyperCore oraclePx (independent external-venue median), s3 = optional ref (Pyth adapter).
+    ///   3 sources => median. 2 sources => the one least favourable to liquidation (long: max, short: min), i.e. BOTH must agree.
+    ///   Any missing/failed source => (0,0). Never used for voluntary closes (they use getPrice), so a failing second source
+    ///   cannot trap users (F8).
+    function getLiquidationPrice(uint32 market, bool forLong) external view returns (uint256 price, uint64 updatedAt) {
+        Mkt memory m = mkt[market];
+        if (!m.on) return (0, 0);
+        uint256 mid2 = _guardedMid2(m);   // also validates oraclePx > 0 and |mid - oraclePx| <= maxDevBps
+        if (mid2 == 0) return (0, 0);
+        (bool ok2, bytes memory r2) = _read(oraclePxPrecompile, m.asset);
+        if (!ok2 || r2.length < 32) return (0, 0);
+        uint256 scale = 10 ** (12 + m.szDec);
+        uint256 s1 = mid2 * scale / 2;
+        uint256 s2 = uint256(abi.decode(r2, (uint64))) * scale;
+        if (s1 == 0 || s2 == 0) return (0, 0);
+        (bool okr, uint256 s3) = _refRead(market, s1);
+        if (!okr) return (0, 0);
+        if (s3 == 0) {
+            price = forLong ? (s1 > s2 ? s1 : s2) : (s1 < s2 ? s1 : s2);
+        } else {
+            price = _median(s1, s2, s3);
+        }
+        updatedAt = uint64(block.timestamp);
+    }
+
+    function _median(uint256 a, uint256 b, uint256 c) internal pure returns (uint256) {
+        if ((a >= b && a <= c) || (a <= b && a >= c)) return a;
+        if ((b >= a && b <= c) || (b <= a && b >= c)) return b;
+        return c;
     }
 }

@@ -74,3 +74,10 @@ Then, from the multisig, as separate transactions, in this order:
 
 ## 7. Go/no-go gates
 Audits closed ✅ · legal opinion ✅ · oracle verified on fork ✅ · monitoring/alerts ✅ · multisig+timelock ✅ · caps tiny ✅ · incident runbook rehearsed ✅ · risk disclosures live ✅. Any ❌ → do not enable.
+
+## v4 liquidation & house-capital rules (read before launch)
+- **Liquidation is two-step:** `markLiquidatable(id)` → wait ≥ 2 blocks (and ≤ 120 s) → `liquidate(id)`. A keeper bot must do both (nothing is paid for it; consider a bounty). If you do not run one, busted positions simply sit until someone marks them; their owners can still close.
+- **Liquidation price = multi-source** (BBO mid + HL `oraclePx`, median with the optional Pyth ref). Before launch: verify on testnet 998 that both precompile reads work *inside the EVM*, measure real block time and `oraclePx` lag, and revisit `MARK_MIN_BLOCKS`/`MARK_TTL` (constants; changing them = redeploy). If you enable the Pyth ref, **verify its address/ABI first**.
+- **Owner withdrawals are bounded by `reservedLiability()`** (worst case: Σ over markets of max(long, short) of margin × maxProfitMult). Expect `ownerWithdrawable() == 0` while positions are open. Seed the pool/insurance well above the reserve you are willing to underwrite, or lower `maxProfitMult` / OI caps / `maxMarginPerPosition`, otherwise the pool is effectively locked.
+- Closing positions never depends on the liquidation guard; if the *primary* guards trip, all trading halts (see AUDIT v4 limits).
+- Keep: `HyperCoreOracle.finalizeBootstrap()` before `unpause()`, mainnet deadband ≥ 0.2 bps, config delay ≥ 1 day, mainnet flag OFF until an independent audit + legal review.

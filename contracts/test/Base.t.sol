@@ -6,11 +6,20 @@ import {Paper10kExchange} from "../src/Paper10kExchange.sol";
 import {Paper10kX} from "../src/Paper10kX.sol";
 import {TestUSDC} from "../src/testnet/TestUSDC.sol";
 import {IPriceOracle} from "../src/IPriceOracle.sol";
+import {ILiquidationOracle} from "../src/ILiquidationOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract MockOracle is IPriceOracle {
+contract MockOracle is IPriceOracle, ILiquidationOracle {
     mapping(uint32 => uint256) public px;
+    mapping(uint32 => uint256) public liqPx;   // 0 => follows px
+    bool public liqDown;
     function set(uint32 m, uint256 p) external { px[m] = p; }
+    function setLiq(uint32 m, uint256 p) external { liqPx[m] = p; }
+    function setLiqDown(bool d) external { liqDown = d; }
+    function getLiquidationPrice(uint32 m, bool) external view returns (uint256, uint64) {
+        if (liqDown) return (0, 0);
+        return (liqPx[m] == 0 ? px[m] : liqPx[m], uint64(block.timestamp));
+    }
     function getPrice(uint32 m) external view returns (uint256, uint64) { return (px[m], uint64(block.timestamp)); }
 }
 
@@ -46,6 +55,13 @@ abstract contract Base is Test {
     function _fund(address u, uint256 amt) internal {
         vm.startPrank(u); usdc.faucet(); usdc.approve(address(ex), type(uint256).max); ex.deposit(amt); vm.stopPrank();
     }
+    /// mark -> wait the 2-block persistence window -> liquidate (price must still be past bust at the end)
+    function _liq(uint256 id, address who) internal {
+        ex.markLiquidatable(id);
+        vm.roll(block.number + 2); vm.warp(block.timestamp + 2);
+        vm.prank(who); ex.liquidate(id);
+    }
+    function _markBlock(uint256 id) internal view returns (uint32 b) { (b,) = ex.marks(id); }
     function _next() internal { vm.warp(block.timestamp + 5); vm.roll(block.number + 1); }
     function _solvent() internal view {
         assertGe(usdc.balanceOf(address(ex)), ex.totalFree() + ex.totalMargin() + ex.pool() + ex.insurance());
