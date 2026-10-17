@@ -58,7 +58,10 @@ contract InvariantTest is StdInvariant, Base {
         sel[0]=Handler.dep.selector; sel[1]=Handler.wd.selector; sel[2]=Handler.open.selector; sel[3]=Handler.mv.selector;
         sel[4]=Handler.pass.selector; sel[5]=Handler.cls.selector; sel[6]=Handler.liq.selector; sel[7]=Handler.q.selector;
         targetSelector(FuzzSelector({addr: address(h), selectors: sel}));
-        excludeSender(address(0));
+        // the fuzzer also calls the contracts deployed in setUp directly (good: access control gets fuzzed), but it must not use the
+        // system contracts themselves as msg.sender (e.g. exchange -> usdc.transfer would 'drain' it, a test artefact not a bug)
+        excludeSender(address(0)); excludeSender(address(ex)); excludeSender(address(x)); excludeSender(address(usdc));
+        excludeSender(address(orc)); excludeSender(address(h)); excludeSender(address(this));
     }
     /// cash invariant: contract always holds at least all free balances + margins + pool
     function invariant_solvent() public view { _solvent(); }

@@ -8,6 +8,8 @@ Scope: `contracts/src/*.sol` @ this commit (Solidity 0.8.26, OpenZeppelin 5.1.0 
 inflation in `_liquidate` is caught by `invariant_solvent`). **Not done:** formal verification, differential fuzzing vs. the JS engine, fork tests against the real
 HyperCore precompile, gas-griefing analysis under real chain conditions, review of the frontend for XSS beyond escaping.
 
+Deep invariant run: 4 seeds × 6000 runs × depth 150 (`FOUNDRY_INVARIANT_RUNS=6000 FOUNDRY_INVARIANT_DEPTH=150`) clean after excluding system contracts as fuzz senders (an early failure was a test artefact: the fuzzer used the exchange itself as `msg.sender` to call `usdc.transfer`; not a contract bug).
+
 Test status: `forge test` → 21 tests (13 unit, 3 oracle, 2 token, 2 fuzz at 512 runs, 4 invariants × 64 runs × depth 64), all passing. Line coverage 91%, branch 70%.
 
 ## Findings
