@@ -89,3 +89,6 @@ Audits closed ✅ · legal opinion ✅ · oracle verified on fork ✅ · monitor
 - [ ] Rehearse on HyperEVM testnet 998 with `HyperCoreOracle` (not the signed oracle): the keeper has only been tested against the signed testnet oracle on anvil.
 - [ ] The keeper refuses chain 999 unless `ALLOW_MAINNET=I_ACCEPT_REAL_FUNDS_RISK`; leave that unset until the owner explicitly decides, after an independent audit and legal review.
 
+
+## v6 note — deploy gas vs HyperEVM block limit (found in TESTNET_RUN.md)
+Paper10kExchange creation costs ~4.62M gas; HyperEVM small blocks are capped at 3,000,000. The deployer address must enable **big blocks** (30M limit) via the HyperCore `usingBigBlocks` user action before deploying (or the Exchange must be shrunk), then switch back. Rehearse this on testnet 998 with a funded throwaway key before any mainnet step. Also measure mainnet BTC/ETH mid-vs-oraclePx divergence: with both-agree liquidation, divergence delays liquidations at 10000x.

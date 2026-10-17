@@ -1,0 +1,438 @@
+{
+ "chain": "local anvil fork of HyperEVM testnet (chainId 998)",
+ "forkSource": "https://rpc.hyperliquid-testnet.xyz/evm",
+ "txs": [
+  {
+   "step": "mock.setSingle",
+   "hash": "0x34b4a6fab3f0e6d08fb1ca15eeaa43f8a3a0934a38963344f2e15bbbd19b3a4a",
+   "block": 67160830,
+   "gasUsed": 43517
+  },
+  {
+   "step": "mock.oraclePx",
+   "hash": "0x8ca518492bc881cdd8e1e9d66fbf3a5b8a08d9b22d516291f269a037263e5bf5",
+   "block": 67160834,
+   "gasUsed": 46166
+  },
+  {
+   "step": "mock.bbo",
+   "hash": "0xba13e8a5a35af13c5336a239269279f7720a53509e4c5fd78cad07ae2906cb08",
+   "block": 67160838,
+   "gasUsed": 66102
+  },
+  {
+   "step": "oracle.setGuards",
+   "hash": "0xcedf3ba38a9c4fdc9ad4435dcda1717465604fd4899defd5d82ae9bb4ff39126",
+   "block": 67160852,
+   "gasUsed": 41360
+  },
+  {
+   "step": "oracle.configure(BTC)",
+   "hash": "0xc98cee2d22ecf1777c3d0df9e820d7c1b435e0120e26d3bdee8db016c022bc2a",
+   "block": 67160856,
+   "gasUsed": 50625
+  },
+  {
+   "step": "oracle.finalizeBootstrap",
+   "hash": "0xd49517b05953bae73d5a49a9375052013f821abcfc2c39af47a0e1053b859055",
+   "block": 67160860,
+   "gasUsed": 29148
+  },
+  {
+   "step": "acceptOwnership",
+   "hash": "0x3b08911e9eb82112551b290d1c1ab7b78d64bc233d3d423ba4de917cb240e177",
+   "block": 67160868,
+   "gasUsed": 25586
+  },
+  {
+   "step": "proposeMarket",
+   "hash": "0xe5632dbb061e81d40c109d2f04f4ac70146609e4015b5303f49e4b3d0302933a",
+   "block": 67160872,
+   "gasUsed": 116392
+  },
+  {
+   "step": "applyMarket",
+   "hash": "0xf330956c5e75934c725cbe5fd41b0371e7ec2dff877d6a0eb134b00e711b8dc3",
+   "block": 67160878,
+   "gasUsed": 118665
+  },
+  {
+   "step": "faucet",
+   "hash": "0xe118edcd10c34b4655b90efd5d77439f2e42a3938eb6572b4f078aef535be86d",
+   "block": 67160882,
+   "gasUsed": 89971
+  },
+  {
+   "step": "approve",
+   "hash": "0xa15f58cd85c5aa7a2e90390db3648fe27764eccd83a8af7d4bcc9455e9267b32",
+   "block": 67160886,
+   "gasUsed": 45943
+  },
+  {
+   "step": "seedPool",
+   "hash": "0xd3fdeec232023dfdbbbb0a250236913c57bc982cdd83393d75be334a96ba1d07",
+   "block": 67160890,
+   "gasUsed": 77737
+  },
+  {
+   "step": "unpause",
+   "hash": "0x71af7a321e575cf4d888fed4d9053176dd9781cee2ae67f2e943f6a2f328b052",
+   "block": 67160894,
+   "gasUsed": 27260
+  },
+  {
+   "step": "mock.bbo(wide)",
+   "hash": "0xc7b81d385b554281aeb7588ce2d5b598621dd7af18021f90d4ea05f741f162df",
+   "block": 67160898,
+   "gasUsed": 29102
+  },
+  {
+   "step": "mock.oraclePx",
+   "hash": "0x54e6d6a90c9be4ee11e6205df5324d416c39803f398e13e4ecf4900b102fafa3",
+   "block": 67160903,
+   "gasUsed": 26266
+  },
+  {
+   "step": "mock.bbo",
+   "hash": "0x51a5b463d7748868db72eed73e33a46400bb2f1e5492a278d25c838608402638",
+   "block": 67160907,
+   "gasUsed": 29102
+  },
+  {
+   "step": "mock.oraclePx(+10%)",
+   "hash": "0xe8c6d1de40833349dcbb1ba2c2619e93365e50e3752478f99e7929d30f539acf",
+   "block": 67160911,
+   "gasUsed": 29066
+  },
+  {
+   "step": "mock.oraclePx",
+   "hash": "0x6685c7fe0d1fb576001a8072a6322089c5c5175a116d4fa87870c9ca33d8013c",
+   "block": 67160916,
+   "gasUsed": 29066
+  },
+  {
+   "step": "mock.bbo",
+   "hash": "0xdf05fe32e2235e635bb64e5e0fa8693203156384d9f8b8ad2a76928b32b29acf",
+   "block": 67160921,
+   "gasUsed": 26302
+  },
+  {
+   "step": "faucet",
+   "hash": "0x04139185ff6ba156446e009520bf04e71f0d46f1597040660092ae222383fc9e",
+   "block": 67160927,
+   "gasUsed": 72871
+  },
+  {
+   "step": "approve",
+   "hash": "0x3a33248f8c8efa1a615c9fa32c76ea26737860fdf92c9511fa40bccacbb371a2",
+   "block": 67160931,
+   "gasUsed": 45931
+  },
+  {
+   "step": "deposit",
+   "hash": "0xa111e8d752751f8a731ccff8a5702d09759902dbae2c36c8005e42a1e50e247f",
+   "block": 67160935,
+   "gasUsed": 100301
+  },
+  {
+   "step": "open(10000x long, 20 USDC)",
+   "hash": "0xa85c2f1b1a640c9bcc5b055490e04411a20ce8aeecc29483be5b542a253d72b3",
+   "block": 67160940,
+   "gasUsed": 231457
+  },
+  {
+   "step": "faucet",
+   "hash": "0xac22e85baacc7febacefe316dd6454e54266a056beeff2e226b7f8aeb617f12a",
+   "block": 67160944,
+   "gasUsed": 72871
+  },
+  {
+   "step": "approve",
+   "hash": "0x63d9c234791326f256c750890977947c321e9f9a7a4acaf20c1ca76017333225",
+   "block": 67160948,
+   "gasUsed": 45931
+  },
+  {
+   "step": "deposit",
+   "hash": "0xa880e61c02915c15e2dea12c9133d869ece556155a6af43b4da022a089e2c5f4",
+   "block": 67160953,
+   "gasUsed": 83201
+  },
+  {
+   "step": "open(10000x long, 20 USDC)",
+   "hash": "0x9204d58532e064c1e0832797ee79050adac905adfb3edfd5577603cf6a734b00",
+   "block": 67160957,
+   "gasUsed": 180157
+  },
+  {
+   "step": "faucet",
+   "hash": "0xf3b32898f723519598b65df27698f1911e7a45ec0175bf629903e689d8747f17",
+   "block": 67160961,
+   "gasUsed": 72871
+  },
+  {
+   "step": "approve",
+   "hash": "0x2297c1162697c351665849472c8b5d950211e4106865dd009ec8b645af6f9c78",
+   "block": 67160965,
+   "gasUsed": 45931
+  },
+  {
+   "step": "deposit",
+   "hash": "0x708faee466d5efdc13bb4108a818b7d3624fb52b00eb4252bcb77a1b6044a405",
+   "block": 67160969,
+   "gasUsed": 83201
+  },
+  {
+   "step": "open(10000x long, 20 USDC)",
+   "hash": "0xdb7008081fef5abeae14e3daab72d1ee8572163ce61f33dd218ec53ecb529c27",
+   "block": 67160973,
+   "gasUsed": 180157
+  },
+  {
+   "step": "faucet",
+   "hash": "0xb34cb5ba116104c8d39d9429fbacca0dbc2ae169d4cfd5095668b70d1bee6b2f",
+   "block": 67160977,
+   "gasUsed": 72871
+  },
+  {
+   "step": "approve",
+   "hash": "0xa2b3b9b855641e7cb62ac6e813e19bb240588c23c3b9439ea1bbedc9a1268190",
+   "block": 67160981,
+   "gasUsed": 45931
+  },
+  {
+   "step": "deposit",
+   "hash": "0xf60098678d5c741766560e085f37835a6af9f056c8f9fddbb17cd7ba90b33ac2",
+   "block": 67160985,
+   "gasUsed": 83201
+  },
+  {
+   "step": "open(10000x long, 20 USDC)",
+   "hash": "0xd38293feabbdc99104281a9a8b8b1d38017452025b93f215ba7188d22edf7496",
+   "block": 67160989,
+   "gasUsed": 180157
+  },
+  {
+   "step": "mock.oraclePx",
+   "hash": "0xc1886219e30bbf6a5fced56c22e6b64d31a8ad1bf06560bd98618cafd1b3f024",
+   "block": 67160996,
+   "gasUsed": 29066
+  },
+  {
+   "step": "mock.bbo",
+   "hash": "0xc8268a2445146d80d4ab825f449be26c56b029f05a75403154c0013aec4edea4",
+   "block": 67161000,
+   "gasUsed": 31902
+  }
+ ],
+ "gas": {
+  "mock.setSingle": [
+   43517
+  ],
+  "mock.oraclePx": [
+   46166,
+   26266,
+   29066,
+   29066
+  ],
+  "mock.bbo": [
+   66102,
+   29102,
+   26302,
+   31902
+  ],
+  "oracle.setGuards": [
+   41360
+  ],
+  "oracle.configure(BTC)": [
+   50625
+  ],
+  "oracle.finalizeBootstrap": [
+   29148
+  ],
+  "acceptOwnership": [
+   25586
+  ],
+  "proposeMarket": [
+   116392
+  ],
+  "applyMarket": [
+   118665
+  ],
+  "faucet": [
+   89971,
+   72871,
+   72871,
+   72871,
+   72871
+  ],
+  "approve": [
+   45943,
+   45931,
+   45931,
+   45931,
+   45931
+  ],
+  "seedPool": [
+   77737
+  ],
+  "unpause": [
+   27260
+  ],
+  "mock.bbo(wide)": [
+   29102
+  ],
+  "mock.oraclePx(+10%)": [
+   29066
+  ],
+  "deposit": [
+   100301,
+   83201,
+   83201,
+   83201
+  ],
+  "open(10000x long, 20 USDC)": [
+   231457,
+   180157,
+   180157,
+   180157
+  ]
+ },
+ "forkBlock": 67160823,
+ "liveSeed": {
+  "btc_oraclePx_raw": "1034650",
+  "btc_bid_raw": "1029800",
+  "btc_ask_raw": "1030600",
+  "scale": "raw / 10 = USD (BTC szDecimals 5)"
+ },
+ "addresses": {
+  "owner": "0xa992B1F4641410Cc7252492E3CcC03651Ab577Bf",
+  "TestUSDC": "0x524E3Ec28B84AC15F361731901375259Ca14243b",
+  "HyperCoreOracle": "0xB575A63a60c16714853BD51D96fD1b8e6b5743d3",
+  "PAPER10KX": "0xCB78AF30699820C0A8E761F6c32aC161C42391e0",
+  "Exchange": "0x7d055A48282e4F99Cff579b7Ba08e3bd00eabC3a",
+  "mockOraclePx": "0x0000000000000000000000000000000000000807",
+  "mockBBO": "0x000000000000000000000000000000000000080e"
+ },
+ "deployTxs": [
+  {
+   "contract": "TestUSDC",
+   "address": "0x524e3ec28b84ac15f361731901375259ca14243b",
+   "hash": "0xc0c10487133cbf5752cb601577b60eede85c48c953c96258551bacface786e05",
+   "gasUsed": 550210
+  },
+  {
+   "contract": "HyperCoreOracle",
+   "address": "0xb575a63a60c16714853bd51d96fd1b8e6b5743d3",
+   "hash": "0x0a0a496df5fadda62a4bf67ce633bd117b4506714a4ad70bfa617c14dcd25c88",
+   "gasUsed": 1409076
+  },
+  {
+   "contract": "Paper10kX",
+   "address": "0xcb78af30699820c0a8e761f6c32ac161c42391e0",
+   "hash": "0x55cd53c071d3402124daf5910c7998dd6f9e7a90cf287e4860abb7b14f487be3",
+   "gasUsed": 830227
+  },
+  {
+   "contract": "Paper10kExchange",
+   "address": "0x7d055a48282e4f99cff579b7ba08e3bd00eabc3a",
+   "hash": "0x9cc3957a378f5d975b90e039fec73fe9b4e4a1b4b27ecb3855bed11cabdab9c0",
+   "gasUsed": 4615873
+  },
+  {
+   "contract": "Paper10kX",
+   "address": "0xcb78af30699820c0a8e761f6c32ac161c42391e0",
+   "hash": "0x29c5320f388c60550fdf27d9e382e3e76995190a8c2f16d361192e06e90e192e",
+   "gasUsed": 47887
+  },
+  {
+   "contract": "Paper10kX",
+   "address": "0xcb78af30699820c0a8e761f6c32ac161c42391e0",
+   "hash": "0xf97a3a22df168c117d8982739fda7c6e74ef444440f1fbaa0a20974663b22ae4",
+   "gasUsed": 48052
+  }
+ ],
+ "oracleReads": {
+  "getPrice_BTC_usd": 103020,
+  "liqPriceLong_BTC_usd": 103465,
+  "expectedMidFromLive_usd": 103020,
+  "liqPriceLongAfterMove_usd": 102430.29999999999
+ },
+ "keeper": {
+  "marks": [
+   {
+    "id": "1",
+    "hash": "0x107d2bd134f371aeb933b408f61b7a48bd9f1aa4b9380684ad4f1ab287f99382",
+    "block": "67161015",
+    "gasUsed": "105156"
+   },
+   {
+    "id": "2",
+    "hash": "0x2e811c0a6556e06eda8cdc6961b850a9eff4ed8f93fa74e954236b4d6f213ebd",
+    "block": "67161025",
+    "gasUsed": "105156"
+   },
+   {
+    "id": "3",
+    "hash": "0xd75324294054506db94d4692339c64e740ac09815191c3d05f883eea10aee9c8",
+    "block": "67161034",
+    "gasUsed": "105156"
+   },
+   {
+    "id": "4",
+    "hash": "0x60f4a16c559ed8be85bb656e50bb7f5007fcf3bfecf6303f678e9419a7e6e383",
+    "block": "67161043",
+    "gasUsed": "105156"
+   }
+  ],
+  "liquidations": [
+   {
+    "id": "1",
+    "hash": "0x51fdc604e1fc958632336bd4385d694ada0c3c26ef4a4197121531aa63bd661b",
+    "block": "67161054",
+    "gasUsed": "205955"
+   },
+   {
+    "id": "2",
+    "hash": "0xfaade354c81927e17d249ea146a1fb03fa74f546c3a439608f546be8c84729c7",
+    "block": "67161064",
+    "gasUsed": "154655"
+   },
+   {
+    "id": "3",
+    "hash": "0x4e11132244d34cbea6014ce142f21e4260c2af4cd3a5961a84fae3367964a22a",
+    "block": "67161073",
+    "gasUsed": "154655"
+   },
+   {
+    "id": "4",
+    "hash": "0x19ca644829f1b54235998d55ac87aefeca2dab8d830d7fe7350cc3334bd73bf9",
+    "block": "67161092",
+    "gasUsed": "141324"
+   }
+  ],
+  "blocksBetweenMarkAndLiquidate": [
+   39,
+   39,
+   39,
+   49
+  ]
+ },
+ "results": {
+  "bountyUSDC": "1.6",
+  "houseUSDC": "78.4",
+  "paper10kxMinted": [
+   "2000",
+   "2000",
+   "2000",
+   "2000"
+  ],
+  "positionIds": [
+   "1",
+   "2",
+   "3",
+   "4"
+  ],
+  "failedChecks": 0
+ }
+}

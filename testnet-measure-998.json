@@ -1,0 +1,64 @@
+{
+ "rpc": "https://rpc.hyperliquid-testnet.xyz/evm",
+ "window_s": 120,
+ "blocks_seen": 31,
+ "block_span": 120,
+ "chain_seconds": 118,
+ "avg_block_time_s": 0.983,
+ "blocks_per_s_wall": 0.97,
+ "rpc_latency_ms_avg": 666,
+ "markets": {
+  "BTC": {
+   "samples": 31,
+   "oraclePx_changes": 19,
+   "oraclePx_update_gap_s": {
+    "avg": 6.1,
+    "max": 12.46
+   },
+   "spread_bps": {
+    "min": 7.8,
+    "avg": 10.4,
+    "max": 14.6
+   },
+   "mid_vs_oraclePx_bps": {
+    "min": 34.8,
+    "avg": 37.1,
+    "max": 39.2
+   },
+   "sample": {
+    "nm": "BTC",
+    "n": 67160020,
+    "ts": 1792254790,
+    "opx": 103410,
+    "bid": 102970,
+    "ask": 103070
+   }
+  },
+  "ETH": {
+   "samples": 31,
+   "oraclePx_changes": 19,
+   "oraclePx_update_gap_s": {
+    "avg": 6.1,
+    "max": 15.9
+   },
+   "spread_bps": {
+    "min": 8.8,
+    "avg": 13.8,
+    "max": 18.9
+   },
+   "mid_vs_oraclePx_bps": {
+    "min": 0.6,
+    "avg": 5.6,
+    "max": 14.4
+   },
+   "sample": {
+    "nm": "ETH",
+    "n": 67160020,
+    "ts": 1792254790,
+    "opx": 79.81,
+    "bid": 79.72,
+    "ask": 79.79
+   }
+  }
+ }
+}
