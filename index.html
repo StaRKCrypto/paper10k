@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PAPER10K — simulated perps, up to 10000x (paper trading)</title>
+<meta name="description" content="Paper trading simulator: synthetic perpetuals priced from Hyperliquid, up to 10000x leverage. Simulated funds only. Not financial advice.">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2305080d'/%3E%3Cpath d='M6 22l6-8 5 4 9-11' fill='none' stroke='%2321e6a1' stroke-width='3'/%3E%3C/svg%3E">
+</head><body>
+<div id="simbar">⚠ PAPER TRADING · SIMULATED FUNDS · NOT FINANCIAL ADVICE — no real money, no wallet, no keys. Nothing here can be withdrawn.</div>
+<div id="offline" hidden></div>
+<header>
+  <div class="logo"><span class="mark">▲</span> PAPER<b>10K</b><small>simulator</small></div>
+  <div class="hstats">
+    <div><label>Equity</label><span id="hEquity">$1,000.00</span></div>
+    <div><label>Available</label><span id="hBal">$1,000.00</span></div>
+    <div><label>PnL (run)</label><span id="hPnl">$0.00</span></div>
+  </div>
+  <div class="hbtns"><span id="feedPill" class="pill">connecting…</span><button id="btnBoard" class="ghost">🏆 Leaderboard</button><button id="btnShareAcct" class="ghost">📸 PnL card</button><button id="btnReset" class="danger">↺ Reset $1,000</button></div>
+</header>
+
+<section id="hero">
+  <button id="heroClose" class="x" title="Hide">×</button>
+  <div class="hero-in">
+    <p class="eyebrow">synthetic perpetuals · hyperliquid prices · simulated</p>
+    <h1>Trade up to <em>10000x</em>.<br>Lose it all in <em>0.009%</em>.</h1>
+    <p class="sub">A paper-trading playground. Real live prices from Hyperliquid, fake $1,000, zero market impact, nothing to lose but your pride.</p>
+    <div class="stats"><div><b>10000x</b><span>max leverage</span></div><div><b>0</b><span>market impact · fills at mid</span></div><div><b>100%</b><span>simulated · state lives in your browser</span></div></div>
+    <a class="cta" href="#terminal" id="ctaStart">Start trading ↓</a>
+  </div>
+</section>
+
+<main id="terminal">
+  <aside id="markets"><h3>Markets</h3><div id="mlist"></div></aside>
+  <section id="center">
+    <div class="mhead"><div><h2 id="mSym">BTC-PERP</h2><span class="tag">synthetic</span></div><div id="mPrice" class="big">—</div><div id="mChg" class="chg">—</div><div id="mFund" class="muted"></div>
+      <div class="tfs" id="tfs"><button data-tf="1m" class="on">1m</button><button data-tf="5m">5m</button><button data-tf="15m">15m</button><button data-tf="1h">1h</button></div></div>
+    <canvas id="chart"></canvas>
+    <div class="tabs" id="tabs"><button data-t="pos" class="on">Positions <i id="nPos">0</i></button><button data-t="ord">Open orders <i id="nOrd">0</i></button><button data-t="hist">Trade history</button><button data-t="board">Leaderboard</button></div>
+    <div id="tabBody" class="tabbody"></div>
+  </section>
+  <aside id="ticket">
+    <div class="seg" id="sideSeg"><button data-s="long" class="on long">Long</button><button data-s="short" class="short">Short</button></div>
+    <div class="seg small" id="typeSeg"><button data-o="market" class="on">Market</button><button data-o="limit">Limit</button></div>
+    <label class="f" id="limitRow" hidden>Limit price (USD)<input id="limitPx" type="number" step="any"></label>
+    <label class="f">Margin (USD) <small id="availTxt"></small><input id="margin" type="number" min="1" step="any" value="10"></label>
+    <div class="chips" id="pcts"><button data-p="25">25%</button><button data-p="50">50%</button><button data-p="75">75%</button><button data-p="100">Max</button></div>
+    <label class="f">Leverage <b id="levTxt">100x</b>
+      <input id="levRange" type="range" min="0" max="1000" value="500">
+      <input id="levNum" type="number" min="1" max="10000" step="1" value="100"></label>
+    <div class="chips" id="levChips"><button>1</button><button>10</button><button>100</button><button>1000</button><button>5000</button><button>10000</button></div>
+    <div id="riskNote" class="risk"></div>
+    <dl class="quote">
+      <dt>Entry (mid)</dt><dd id="qEntry">—</dd><dt>Notional</dt><dd id="qNot">—</dd><dt>Size</dt><dd id="qSize">—</dd>
+      <dt>Liquidation price</dt><dd id="qLiq" class="liq">—</dd><dt>Liq. distance</dt><dd id="qDist">—</dd>
+      <dt>Fee (3.5 bps, open)</dt><dd id="qFee">—</dd><dt>Funding (sim, /h)</dt><dd id="qFund">—</dd>
+    </dl>
+    <button id="submit" class="go long">Buy / Long</button>
+    <p class="fine">Paper trading · simulated funds · not financial advice. Isolated margin; liquidation forfeits the margin. Fees and funding are simulated.</p>
+  </aside>
+</main>
+<footer>PAPER10K is an educational simulator inspired by synthetic-perp exchanges. Prices: Hyperliquid public API (Binance public fallback). No trackers, no wallets, no real money. <a href="https://github.com/StaRKCrypto/paper10k" target="_blank" rel="noopener">source</a></footer>
+
+<div id="toasts"></div>
+<div id="modal" hidden><div class="mbox"><button class="x" id="mClose">×</button><div id="mBody"></div><canvas id="cardCv"></canvas><div class="mbtns"><button id="mDl" class="go long">⬇ Download PnL card</button><button id="mOk" class="ghost">Close</button></div></div></div>
+<script type="module" src="src/app.js"></script>
+</body></html>
