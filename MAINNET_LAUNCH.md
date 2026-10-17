@@ -24,11 +24,13 @@
 - [ ] Entity, liability, insurance, privacy policy, risk disclosures; marketing rules (no "guaranteed", no targeting minors).
 - [ ] "Papertrade" and its docs are third-party: confirm branding/IP does not imply affiliation (we use "inspired by").
 
-## 3. Oracle
-- [ ] **Do not use `SignedPriceOracle` on mainnet** unless the signer is a hardened threshold/multisig service with monitoring and you accept AUDIT #4.
-- [ ] If using `HyperCoreBboOracle`: verify precompile address (`0x…080e`), ABI (`bid,ask` uint64), per-asset `szDecimals`, and behaviour at block boundaries on a HyperEVM **testnet and fork**; add a second reference/deviation circuit-breaker; decide staleness semantics (adapter returns `block.timestamp`).
-- [ ] Set `maxPriceAge`, `minHold`, deadband/haircut so latency arbitrage is unprofitable; simulate with real tick data.
-- [ ] Runbook for oracle freeze (§ AUDIT #6): who calls `pause`, `setEmergencyMode`, `forcePrice`.
+## 3. Oracle (v2: HyperCore precompile pull oracle)
+- [ ] Mainnet deploy uses `HyperCoreOracle` automatically; `SignedPriceOracle`/`TestUSDC` are testnet-only and the script refuses them on chain 999.
+- [ ] **Verify on a live HyperEVM RPC before anything else** (`tools/verify-hypercore.sh`): BBO `0x…080e` returns `(bid,ask)` uint64, oraclePx `0x…0807` returns uint64, and the asset indices / `szDecimals` you pass to `configure` (BTC asset 0 szDec 5, ETH asset 1 szDec 4 at time of writing — re-check via `perpAssetInfo` 0x…080a / HL `meta`). Then deploy to HyperEVM **testnet (998)** and run a $1 open/close there; the in-EVM read has never been exercised (AUDIT "Unverified" #1).
+- [ ] Guards: `HyperCoreOracle.setGuards(maxSpreadBps=30, maxDevBps=100, ref, maxRefDevBps, refMaxAge)`. Tune from real tick data. The oracle fails closed (trading halts) rather than serve a suspect price.
+- [ ] Optional second reference (Pyth): only after you verify the HyperEVM Pyth address from Pyth's official docs and its `getPriceUnsafe` ABI; deploy `PythReference(owner, pyth)`, `setFeed(market, priceId)`, then `HyperCoreOracle.setGuards(..., ref=<PythReference>, ...)`.
+- [ ] Latency-arb economics: set deadband/haircut/`minHold` so that your measured off-chain-information edge < costs; simulate.
+- [ ] Runbook for oracle freeze: `pause()` (owner/guardian) → `setEmergencyMode(true)` → users `emergencyCancel`; or `proposeOracle` → wait delay → `applyOracle`.
 
 ## 4. Pool-insolvency sizing at 10000x
 Worst-case instantaneous liability ≈ `Σ_sides min(OI_side × haircut(move) , maxProfitMult × Σ margin)`. With `maxProfitMult=100` and per-position margin cap `M`, one position can owe `100·M`.
@@ -36,28 +38,39 @@ Choose `OI cap`, `MAX_MARGIN`, `TVL_CAP` and **seed** so that `pool ≥ ~5–10%
 Expect queue formation on any 0.5–1% BTC move if OI is near cap. Start tiny; raise caps only after audits and weeks of monitored operation. Monitor `pool`, `queuedTotal`, OI, price age; alert on queue > 0.
 
 ## 5. Owner/admin model
-- Owner = **multisig (≥3/5) behind a ≥48 h timelock** (owner can change haircut/fees/caps retroactively — AUDIT #3). `Ownable2Step`: new owner must `acceptOwnership()`.
-- Guardian = separate hot key that can only `pause()`.
-- Powers: `setMarket`, `setRisk`, `setPricing`, `proposeOracle/applyOracle (delay)`, `seedPool`, `withdrawPool` (surplus only), `pause/unpause`, `setEmergencyMode`, `setGuardian`, `rescueToken` (not collateral). Users can always `withdraw` free balance, even paused.
-- Emergency: `pause()` → (optional) `setEmergencyMode(true)` → users `emergencyCancel(id)` get margin back at entry (no PnL). There is no function that lets the owner take user balances or margin.
+- Owner = **multisig (≥3/5)**. The exchange has its own immutable timelock `configDelay` (deploy script: ≥ 1 day required on mainnet; use **2 days**), so a hostile or compromised owner cannot act instantly. Owner also controls `HyperCoreOracle` (guards) and `PythReference`: put those behind the same multisig; consider a timelock contract in front of them (they are not timelocked by themselves).
+- **Open positions are protected:** parameters are versioned; a position keeps the version it opened under (maintenance margin, fees, haircut, deadband, cap, mint rate). New values only affect positions opened after `applyConfig`.
+- Timelocked: `proposeConfig/applyConfig/cancelConfig`, `proposeMarket/applyMarket`, `proposeOracle/applyOracle`, `proposeWithdraw/applyWithdraw` (pool or insurance surplus only; blocked while wins are queued; can never touch free balances or margins). Instant: `pause`, `closeMarket` (owner or guardian), `unpause`, `setEmergencyMode`, `setGuardian`, `seedPool`, `fundInsurance`.
+- Guardian = hot key that can only `pause()` / `closeMarket()`.
+- Emergency: `pause()` → `setEmergencyMode(true)` → users `emergencyCancel(id)` get margin back at entry (no PnL). `withdraw` of free balance always works.
 
-## 6. Exact deploy commands (run yourself, from a clean machine, hardware wallet)
+## 6. Exact deploy steps (run yourself, from a clean machine, hardware wallet). Nothing below has been run on mainnet.
 ```sh
 git clone https://github.com/StaRKCrypto/paper10k && cd paper10k/contracts
-export PATH=$PATH:~/.foundry/bin && forge test               # all green, then: forge build
-# verify COLLATERAL (native USDC on HyperEVM; address seen in papertrade's bundle: 0xb88339CB7199b77E23DB6E890353E22632Ba630f) on hyperevmscan.io + Circle docs
-export OWNER=<your multisig contract address>                 # MUST be a contract on mainnet
+export PATH=$PATH:~/.foundry/bin
+forge test                                                        # 41 tests green
+FOUNDRY_FUZZ_RUNS=5000 FOUNDRY_INVARIANT_RUNS=300 FOUNDRY_INVARIANT_DEPTH=100 forge test
+bash ../tools/verify-hypercore.sh                                 # precompile layouts live on RPC
+# 0. verify COLLATERAL (native USDC on HyperEVM; address seen in Papertrade's bundle: 0xb88339CB7199b77E23DB6E890353E22632Ba630f) on hyperevmscan.io + Circle docs
+# 1. Rehearse on HyperEVM TESTNET first (chain 998, throwaway key from the official faucet, never a real key):
+OWNER=<throwaway addr> USE_HYPERCORE_ORACLE=1 forge script script/Deploy.s.sol --rpc-url https://rpc.hyperliquid-testnet.xyz/evm --private-key <THROWAWAY> --broadcast
+# 2. Mainnet deploy (deploys PAUSED; refuses unless every check passes):
+export OWNER=<your multisig contract address>                    # MUST be a contract on mainnet
 export COLLATERAL=<verified USDC address>
 export MAINNET_ENABLE=I_ACCEPT_REAL_FUNDS_RISK
-export MAX_MARGIN=50000000 TVL_CAP=5000000000 MIN_MARGIN=1000000     # 6-dec units: $50 / $5,000 / $1
-export USE_HYPERCORE_ORACLE=true                              # or ORACLE_SIGNER=<hardened signer> for the signed oracle
-forge script script/Deploy.s.sol --rpc-url https://rpc.hyperliquid.xyz/evm --ledger --broadcast   # or --account <keystore name>; never --private-key on a shared shell
-# Then, from the multisig (each a separate proposal): 
-#   PAPER10KX.acceptOwnership(); [HyperCoreBboOracle].configure(0, <BTC asset idx>, <szDec>); configure(1, <ETH idx>, <szDec>)
-#   Exchange.setMarket(0,true,capLong,capShort); setMarket(1,...); setPricing/setRisk to reviewed values; setGuardian(<hot key>)
-#   USDC.approve(exchange, seed); Exchange.seedPool(seed); verify sources on hyperevmscan; dry-run a $1 position; THEN Exchange.unpause()
+export CONFIG_DELAY=172800                                        # 2 days (script requires >= 1 day)
+export MAX_MARGIN=50000000 TVL_CAP=5000000000 MIN_MARGIN=1000000  # 6-dec units: $50 / $5,000 / $1
+forge script script/Deploy.s.sol --rpc-url https://rpc.hyperliquid.xyz/evm --ledger --broadcast
+#   (or --account <keystore name>; never --private-key on a shared shell). Note printed: Oracle, PAPER10KX, Exchange.
 ```
-Frontend: only after the above, edit `src/chain/config.js` → `MAINNET_ENABLED = true`, add `"999": {exchange, collateral, px, oracle, block}` to `deployments.json`, commit. The UI then shows a red **MAINNET — REAL FUNDS** banner on chain 999.
+Then, from the multisig, as separate transactions, in this order:
+1. `PAPER10KX.acceptOwnership()`.
+2. `HyperCoreOracle.configure(0, <BTC asset idx>, <BTC szDecimals>)` and `configure(1, <ETH asset idx>, <ETH szDecimals>)` (instant on the oracle, but no market is live yet). Optional: `setGuards(...)`.
+3. `Exchange.proposeMarket(0, true, capLong, capShort)`, `proposeMarket(1, ...)` → **wait `configDelay`** → `applyMarket(0)`, `applyMarket(1)`. (Deploy defaults for risk params are the reviewed values in `script/Deploy.s.sol`; to change them: `proposeConfig(params, ops)` → wait → `applyConfig()`.)
+4. `USDC.approve(exchange, seed)`; `Exchange.seedPool(seed)`; `Exchange.fundInsurance(ins)` (suggest ≥ 25 % of pool).
+5. `Exchange.setGuardian(<hot key>)`; verify sources on hyperevmscan.
+6. Dry run: with `MAX_MARGIN` tiny, `unpause()` and open/close a $1 position from a separate wallet; watch `getPrice` reverts (guard trips) for a day. If anything looks off: `pause()`.
+7. Frontend: edit `src/chain/config.js` → `MAINNET_ENABLED = true`, add `"999": {exchange, collateral, px, oracle, block}` to `deployments.json`, commit. The UI then shows the red **MAINNET — REAL FUNDS** banner on chain 999.
 
 ## 7. Go/no-go gates
 Audits closed ✅ · legal opinion ✅ · oracle verified on fork ✅ · monitoring/alerts ✅ · multisig+timelock ✅ · caps tiny ✅ · incident runbook rehearsed ✅ · risk disclosures live ✅. Any ❌ → do not enable.

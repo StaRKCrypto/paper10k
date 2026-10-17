@@ -15,6 +15,9 @@ contract TestUSDC is ERC20 {
         return 6;
     }
 
+    /// @notice unrestricted mint — TESTNET ONLY token, used by tests and local e2e
+    function mintTo(address to, uint256 amt) external { _mint(to, amt); }
+
     /// @notice free test tokens, once per hour per address
     function faucet() external {
         require(block.timestamp >= lastDrip[msg.sender] + COOLDOWN, "cooldown");

@@ -53,11 +53,12 @@ async function refresh() {
   if (c && d) {
     try {
       const acct = W.state.account, r = (to, sel, ...a) => W.call(c, to, enc(sel, ...a));
-      const [paused, pool, tm, tf, maxLev, minM, maxM, qt] = await Promise.all([
+      const [paused, pool, tm, tf, cp, qt, ins] = await Promise.all([
         r(d.exchange, SEL.paused), r(d.exchange, SEL.pool), r(d.exchange, SEL.totalMargin), r(d.exchange, SEL.totalFree),
-        r(d.exchange, SEL.maxLeverage), r(d.exchange, SEL.minMargin), r(d.exchange, SEL.maxMarginPerPosition), r(d.exchange, SEL.queuedTotal)]);
+        r(d.exchange, SEL.currentParams), r(d.exchange, SEL.queuedTotal), r(d.exchange, SEL.insurance)]);
+      const cw = words(cp), maxLev = '0x' + cw[0], minM = '0x' + cw[9], maxM = '0x' + cw[10];
       data = { paused: toBig(paused.slice(2)) === 1n, pool: toBig(pool.slice(2)), totalMargin: toBig(tm.slice(2)), totalFree: toBig(tf.slice(2)),
-        maxLev: Number(toBig(maxLev.slice(2))), minM: toBig(minM.slice(2)), maxM: toBig(maxM.slice(2)), queued: toBig(qt.slice(2)), prices: {}, positions: [] };
+        maxLev: Number(toBig(maxLev.slice(2))), minM: toBig(minM.slice(2)), maxM: toBig(maxM.slice(2)), queued: toBig(qt.slice(2)), insurance: toBig(ins.slice(2)), prices: {}, positions: [] };
       for (const m of MARKETS) {
         try { const [p, ts] = words(await r(d.oracle, SEL.getPrice, m.id)); data.prices[m.id] = { price: toBig(p), ts: Number(toBig(ts)) }; } catch { data.prices[m.id] = { price: 0n, ts: 0 }; }
       }
@@ -67,7 +68,11 @@ async function refresh() {
         const logs = await W.rpc(c, 'eth_getLogs', [{ address: d.exchange, topics: [TOPIC_OPENED, null, '0x' + acct.slice(2).toLowerCase().padStart(64, '0')], fromBlock: '0x' + (d.block || 0).toString(16), toBlock: 'latest' }]);
         for (const l of logs.slice(-40)) {
           const id = toBig(l.topics[1].slice(2)); const w = words(await r(d.exchange, SEL.positions, id));
-          if (toAddr(w[0]) !== '0x' + '0'.repeat(40)) data.positions.push({ id, market: Number(toBig(w[1])), isLong: toBig(w[2]) === 1n, lev: Number(toBig(w[3])), margin: toBig(w[4]), notional: toBig(w[5]), entry: toBig(w[6]), openedAt: Number(toBig(w[7])), maint: Number(toBig(w[8])) });
+          // positions(): [owner, market, leverage, pv, isLong, margin, notional, entry, openedAt, openedBlock]
+          if (toAddr(w[0]) !== '0x' + '0'.repeat(40)) {
+            const bustPx = toBig((await r(d.exchange, SEL.bustPriceOf, id)).slice(2)); // contract computes it with the params version snapshotted at open
+            data.positions.push({ id, market: Number(toBig(w[1])), lev: Number(toBig(w[2])), isLong: toBig(w[4]) === 1n, margin: toBig(w[5]), notional: toBig(w[6]), entry: toBig(w[7]), openedAt: Number(toBig(w[8])), bust: bustPx });
+          }
         }
       }
     } catch (e) { data = { error: e.message }; }
@@ -75,7 +80,7 @@ async function refresh() {
   render();
 }
 
-const bust = (p) => { const d = p.entry * BigInt(10000 - p.maint) / (10000n * BigInt(p.lev)); return p.isLong ? p.entry - d : p.entry + d; };
+const bust = (p) => p.bust;
 const fmtPx = (b) => Number(b / 10n ** 12n) / 1e6;
 const usd = (n) => '$' + n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 

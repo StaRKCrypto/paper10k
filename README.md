@@ -76,7 +76,7 @@ The simulator is unchanged. A second mode, **On-chain (testnet)**, adds wallet c
 and Solidity contracts (`contracts/`): house pool + isolated-margin perps up to 10000x, signed-price oracle, and **PAPER10KX** (no-value points token minted to a trader on liquidation).
 - **Testnet only. No real funds.** Mainnet support exists in code but is **OFF** (`MAINNET_ENABLED=false`) and has never been deployed — see `MAINNET_LAUNCH.md`.
 - `DOCS_ANALYSIS.md` (papertrade.xyz teardown) · `TESTNET.md` (deploy/run) · `AUDIT.md` (**AI self-audit, not independent**) · `MAINNET_LAUNCH.md` (audit/legal/oracle/insolvency checklist + deploy commands).
-- Tests: `cd contracts && forge test` (unit/fuzz/invariant) · `node --test test/` · local e2e: `tools/e2e-local.sh && python3 tools/e2e-shots.py`.
+- Tests: `cd contracts && forge test` (41 unit/fuzz/invariant tests; see AUDIT.md) · `node --test test/` · local e2e: `tools/e2e-local.sh && python3 tools/e2e-shots.py`.
 - Honest risk copy: nearly all 10000x positions are liquidated within seconds.
 
 **UI (10kx redesign):** landing with live ticker + original ASCII-density canvas, nav (Trade/Positions/House/Leaderboard/On-chain), markets strip, chart, ticket; mobile-first below 640px. Code: `index.html`, `style.css`, `src/ui10k.js`. Screenshots: `docs/shots/ui-*.png`. Layout inspired by public structure of synthetic-perp exchanges; all code/art original.

@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.26;
+
+import {Test} from "forge-std/Test.sol";
+import {Paper10kExchange} from "../src/Paper10kExchange.sol";
+import {Paper10kX} from "../src/Paper10kX.sol";
+import {TestUSDC} from "../src/testnet/TestUSDC.sol";
+import {IPriceOracle} from "../src/IPriceOracle.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+contract MockOracle is IPriceOracle {
+    mapping(uint32 => uint256) public px;
+    function set(uint32 m, uint256 p) external { px[m] = p; }
+    function getPrice(uint32 m) external view returns (uint256, uint64) { return (px[m], uint64(block.timestamp)); }
+}
+
+abstract contract Base is Test {
+    Paper10kExchange ex; Paper10kX x; TestUSDC usdc; MockOracle orc;
+    address owner = address(0xA11CE); address alice = address(0xA1); address bob = address(0xB0B); address keeper = address(0xCEE);
+    uint32 constant BTC = 0;
+    uint256 constant P0 = 100_000e18;
+    uint64 constant DELAY = 2 days;
+
+    function defParams() internal pure returns (Paper10kExchange.Params memory p) {
+        p = Paper10kExchange.Params({maxLeverage: 10_000, maintBps: 1000, winFeeBps: 200, insuranceBps: 1000, maxProfitMult: 100,
+            rateMultiplier: 1000, mintPerCollateral: 100, deadbandWad: 2e12, baseRateWad: 0, minMargin: 1e6, maxMarginPerPosition: 1_000e6});
+    }
+    function defOps() internal pure returns (Paper10kExchange.Ops memory o) { o = Paper10kExchange.Ops({maxTotalDeposits: 1_000_000e6, maxPriceAge: 30, minHold: 3}); }
+
+    function setUp() public virtual {
+        vm.warp(1_000_000); vm.roll(100);
+        usdc = new TestUSDC(); orc = new MockOracle(); orc.set(BTC, P0);
+        x = new Paper10kX(owner, 1e30);
+        ex = new Paper10kExchange(owner, IERC20(address(usdc)), 6, x, orc, DELAY, defParams(), defOps());
+        vm.startPrank(owner);
+        x.setMinter(address(ex), true);
+        ex.proposeMarket(BTC, true, 10_000_000e6, 10_000_000e6);
+        vm.warp(block.timestamp + DELAY); ex.applyMarket(BTC);
+        ex.unpause();
+        vm.stopPrank();
+        _fund(alice, 10_000e6); _fund(bob, 10_000e6);
+        usdc.faucet(); usdc.transfer(owner, 10_000e6);
+        vm.startPrank(owner); usdc.approve(address(ex), type(uint256).max); ex.seedPool(10_000e6); vm.stopPrank();
+        vm.warp(block.timestamp + 1); orc.set(BTC, P0);
+    }
+    function _fund(address u, uint256 amt) internal {
+        vm.startPrank(u); usdc.faucet(); usdc.approve(address(ex), type(uint256).max); ex.deposit(amt); vm.stopPrank();
+    }
+    function _next() internal { vm.warp(block.timestamp + 5); vm.roll(block.number + 1); }
+    function _solvent() internal view {
+        assertGe(usdc.balanceOf(address(ex)), ex.totalFree() + ex.totalMargin() + ex.pool() + ex.insurance());
+    }
+}

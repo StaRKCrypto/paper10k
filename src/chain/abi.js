@@ -2,9 +2,8 @@
 export const SEL = {
   deposit: '0xb6b55f25', withdraw: '0x2e1a7d4d', open: '0xadecf87b', close: '0x0aebeb4e', liquidate: '0x415f1240', free: '0xc9b5bb17',
   pool: '0x16f0115b', totalMargin: '0xeaa674d1', totalFree: '0x333e44e6', positions: '0x99fbab88', paused: '0x5c975abb',
-  processQueue: '0xdc900765', queuedOf: '0xb7106b1c', queuedTotal: '0xe20cfe1c', maxLeverage: '0xae3302c2', minMargin: '0x39c294be',
-  maxMarginPerPosition: '0x9109b0fe', faucet: '0xde5f72fd', balanceOf: '0x70a08231', approve: '0x095ea7b3', allowance: '0xdd62ed3e',
-  getPrice: '0xda26663a', previewClose: '0x39599487', emergencyCancel: '0xdd75cd9b', maxPriceAge: '0x1584410a', minHold: '0xd471ed75',
+  processQueue: '0xdc900765', queuedOf: '0xb7106b1c', queuedTotal: '0xe20cfe1c', currentParams: '0xa50bd4ca', bustPriceOf: '0x8a8c6842', insurance: '0x89cf3204', faucet: '0xde5f72fd', balanceOf: '0x70a08231', approve: '0x095ea7b3', allowance: '0xdd62ed3e',
+  getPrice: '0xda26663a', previewClose: '0x39599487', emergencyCancel: '0xdd75cd9b', ops: '0xe70abe92',
 };
 export const TOPIC_OPENED = '0x4644161e119a512266544afb02a59378a86830eeae4174f3757d67e92267aab2';
 export const TOPIC_LIQUIDATED = '0x22600a0aa3d39e677ae2697808c1828d8dec8a7b140cd5b367ea68783b19015a';

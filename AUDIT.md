@@ -1,8 +1,40 @@
-# AUDIT.md — AI self-audit of the PAPER10K contracts
+# AUDIT.md — AI self-audit of the PAPER10K contracts (v2, after remediation)
 
 > **This is an AI-generated self-audit by the same agent that wrote the code. It is NOT an independent audit, carries no assurance, and is NOT a
-> substitute for a professional audit (and legal review) before any mainnet use.** Several issues below are *design-level risks that cannot be fixed in code*.
+> substitute for a professional audit (and legal review) before any mainnet use.** Several issues are *design-level risks that cannot be fixed in code*.
+> v1 findings are kept below with their v2 status. Nothing has been deployed to any mainnet.
 
+## v2 summary — what changed (remediation round)
+| v1 # | Fix in v2 |
+|---|---|
+| 1 latency arb | **Oracle replaced.** Mainnet uses `HyperCoreOracle`: a *pull* read of the HyperCore BBO precompile (`0x…080e`) and `oraclePx` (`0x…0807`) **inside the trade transaction** — no price is ever pushed, so there is no stale-price window. Guards (fail closed → price 0 → trade reverts): spread ≤ 30 bps, crossed/zero book, |mid − oraclePx| ≤ 100 bps, optional second reference (`PythReference`, conf + staleness + deviation). Win-side "spread": deadband (default 0.0002 %) zeroes tiny wins plus the haircut; `minHold` 3 s and a same-**block** open/close ban. *Residual:* a trader with faster off-chain information than HyperCore's own book still has an edge for moves ≥ deadband; tune with real data. |
+| 2 insolvency | **Insurance fund** (`fundInsurance`, `insuranceBps` = 10 % of liquidated margin + win fees flow in). Wins are paid pool → insurance → FIFO queue. Insurance withdrawal is timelocked and blocked while the queue is non-empty. Exact-equality cash-conservation invariant added. *Residual:* correlated wins can still exceed pool + insurance (queue); sizing in MAINNET_LAUNCH §4. |
+| 3 owner power | **Versioned parameters + timelock.** `maintBps, fees, haircut rate, deadband, profit cap, mint rate, leverage cap, margin limits` live in a `Params` history; every position stores the version it opened under, so **a config change cannot alter an open position's bust price or payout** (fuzzed + invariant `bustFrozenAtOpen`). `proposeConfig/applyConfig`, `proposeMarket/applyMarket`, `proposeOracle/applyOracle`, `proposeWithdraw/applyWithdraw` all wait the immutable `configDelay` (mainnet script enforces ≥ 1 day; launch doc says 2 days). Instant powers are only safety-reducing: `pause`, `closeMarket` (guardian too). *Note:* `Ops` (deposit cap, `maxPriceAge`, `minHold`) are applied with the same timelock but are operational limits that also affect open positions' close timing (not their economics). |
+| 4 signed oracle | `SignedPriceOracle` and `TestUSDC` moved to `src/testnet/`; **the Deploy script refuses them on chain 999**. |
+| 5 maint snapshot | Subsumed by versioned params. |
+| 6 oracle freeze | No jump guard in the primary oracle (gaps are real). If a guard trips, trading halts but `withdraw` of free balance and `emergencyCancel` keep working; owner can swap oracle after the delay. |
+| 15 untested adapter | Precompile layouts **verified live with `eth_call` against the public HyperEVM RPC** (BBO → `(uint64 bid, uint64 ask)`, oraclePx → `uint64`, scale `10^(6−szDecimals)`; BTC szDec 5, ETH 4). Mock-precompile unit tests cover every guard. *Still not run in a HyperEVM fork test or deployed — see "Unverified".* |
+
+## Scope & method (v2)
+`contracts/src/*.sol` (Solidity 0.8.26, OpenZeppelin 5.1.0 vendored). Slither 0.11.6 re-run: `slither . --filter-paths "lib|test|script"` → **0 high, 0 medium actionable**.
+Remaining detector output: `timestamp`, `low-level-calls` (the intentional precompile `staticcall`), `costly-loop` (queue processing, caller-bounded), `incorrect-equality` (`== 0` sentinel checks only), `missing-zero-check` (`setGuardian(0)` intentionally disables the guardian; `setMinter` locks), unindexed event addresses, one missing event on `PythReference.setMaxConfBps`. All accepted.
+
+Tests: `forge test` → **41 tests** (unit, governance/timelock, oracle guards with mock precompiles, Pyth adapter, token, 7 fuzz properties, 9 stateful invariants). Run at 5000 fuzz runs and 300 × depth-100 invariant runs: clean. Coverage: Exchange 98 % lines / 95 % statements, HyperCoreOracle 100 % lines, total 85 % (testnet-only helpers lowest).
+Invariants: exact cash conservation (`balance == free + margin + pool + insurance`), users always fully backed, Σ position margins == `totalMargin`, queue sum, free-balance sum, OI == Σ notionals, **bust price frozen at open under random config changes**, params version monotone, PAPER10KX supply ≤ cap.
+Mutation checks: (a) double-counting liquidation margin into the pool → caught by 3 unit tests, the conservation invariant and a fuzz test; (b) `unpause` not clearing emergency mode → was **not** caught, so `test_unpauseClearsEmergencyMode` was added.
+Fuzz properties: settlement ≤ margin·(1+cap) and solvent for any leverage/side/move; wins monotone in move; bust distance = (1−maint)/lev; random valid config never changes an open position's bust or payout; deposit/withdraw accounting; owner withdrawal bounded by pool/insurance; PAPER10KX mint exact.
+Also verified end-to-end on local anvil (public dev keys only) through the real UI: connect, wrong-network prompt, sign-in, faucet, deposit, open, liquidation minting PAPER10KX.
+
+## Unverified / not done (be explicit)
+1. `HyperCoreOracle` has **never executed against real HyperCore state inside the EVM** (no fork test possible here; Foundry's EVM has no HyperCore precompiles). Only the byte layouts were checked via raw RPC. Gas use of the precompile reads and behaviour at block boundaries are unmeasured on-chain.
+2. `PythReference`: the Pyth contract address on HyperEVM and the `getPriceUnsafe` ABI were **not verified** (address only seen truncated). It is optional and off by default; do not enable until verified from Pyth's official address list.
+3. Guard thresholds (30 bps spread, 100 bps oraclePx deviation, 0.0002 % deadband, 3 s hold) are untuned; a single live sample showed book-vs-`oraclePx` deviation ≈ 4.5 bps (BTC) / 4.7 bps (ETH) and spreads < 0.5 bps, so 100 bps is generous; it may still halt trading in violent markets (fails safe, a liveness cost). One sample is not tuning.
+4. No public-testnet deployment (no faucet-funded throwaway key could be obtained safely), WalletConnect never tested with a real wallet.
+5. Latency arbitrage is *reduced and priced*, not eliminated. Keeper liquidation ops/incentives are not built (anyone can call `liquidate`; no bounty).
+6. Independent audit, legal review, owner multisig/timelock setup, USDC address verification: all still required.
+
+---
+# Original v1 findings (status updated above)
 Scope: `contracts/src/*.sol` @ this commit (Solidity 0.8.26, OpenZeppelin 5.1.0 vendored). Method: manual review against the checklist below, Slither 0.11.6
 (`slither . --filter-paths "lib|test" --exclude-dependencies`), Foundry unit + fuzz + stateful invariant tests, one mutation check (injecting a +1 wei pool
 inflation in `_liquidate` is caught by `invariant_solvent`). **Not done:** formal verification, differential fuzzing vs. the JS engine, fork tests against the real
