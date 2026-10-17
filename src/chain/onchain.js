@@ -35,10 +35,10 @@ function build() {
 }
 
 function setMode(m) {
-  mode = m; const root = $('#chainpanel');
+  mode = m; const root = $('#chainpanel'); if (m === 'chain') document.body.dataset.view = 'app'; document.body.dataset.mode = m;
   for (const b of document.querySelectorAll('#chainbar button')) b.classList.toggle('on', b.dataset.m === m);
   root.hidden = m !== 'chain';
-  for (const sel of ['#hero', '#terminal']) { const el = $(sel); if (el) el.style.display = m === 'chain' ? 'none' : ''; }
+  for (const sel of ['#terminal']) { const el = $(sel); if (el) el.style.display = m === 'chain' ? 'none' : ''; }
   if (simbar()) simbar().innerHTML = m === 'chain' ? esc(bannerFor(chain())) : SIM_TEXT;
   simbar()?.classList.toggle('testnet', m === 'chain');
   if (m === 'chain') { render(); refresh(); timer ??= setInterval(refresh, 8000); } else { clearInterval(timer); timer = null; }

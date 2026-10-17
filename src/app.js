@@ -35,6 +35,7 @@ const cls = (n) => (n >= 0 ? 'up' : 'dn');
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const feed = new Feed();
+window.__10kx = { feed, MARKETS };
 const chart = new Chart($('chart'));
 let sym = 'BTC', side = 'long', otype = 'market', tab = 'pos', tf = '1m';
 

@@ -30,7 +30,7 @@ with sync_playwright() as p:
         pg.expose_function('__rpc', call)
         pg.add_init_script("window.ethereum={isMetaMask:true,on(){},request:async({method,params})=>{const r=await window.__rpc(method,params||[]);if(r.err)throw new Error(r.err);return r.ok}}")
         state['chain'] = '0x1'; ACCT = ACCTS[tag]
-        pg.goto('http://localhost:8091/?dev=1#onchain'); pg.wait_for_selector('#chainpanel .cbanner'); pg.wait_for_timeout(800)
+        pg.goto('http://localhost:8093/?dev=1#onchain'); pg.wait_for_selector('#chainpanel .cbanner'); pg.wait_for_timeout(800)
         pg.screenshot(path=f'{OUT}/chain-{tag}-1-connect.png')
         pg.click('[data-act=injected]'); pg.wait_for_timeout(800)
         pg.screenshot(path=f'{OUT}/chain-{tag}-2-wrong-network.png')
@@ -46,7 +46,7 @@ with sync_playwright() as p:
         if tag == 'mobile':
             pg.fill('#cLev', '10000'); pg.dispatch_event('#cLev', 'input')
             pg.screenshot(path=f'{OUT}/chain-{tag}-4-10000x-warning.png', full_page=True)
-            pg.goto('http://localhost:8091/?dev=1'); pg.wait_for_timeout(2500)
+            pg.goto('http://localhost:8093/?dev=1'); pg.wait_for_timeout(2500)
             pg.screenshot(path=f'{OUT}/chain-{tag}-8-simulator-mode.png'); continue
         # 10000x short margin 5
         pg.wait_for_timeout(1000); pg.click('#cSide [data-s=short]'); pg.fill('#cMargin', '5'); pg.fill('#cLev', '10000'); pg.dispatch_event('#cLev', 'input')
@@ -66,7 +66,7 @@ with sync_playwright() as p:
             pg.click('text=Liquidate (anyone)'); pg.wait_for_function("document.body.innerText.includes('Liquidate: confirmed')", timeout=60000); pg.wait_for_timeout(10000)
             pg.screenshot(path=f'{OUT}/chain-{tag}-7-liquidated-px.png', full_page=True)
             print('PX bal text:', pg.inner_text('#chainpanel').split('PAPER10KX (no value)')[1][:40].replace('\n', ' '))
-        pg.goto('http://localhost:8091/?dev=1'); pg.wait_for_timeout(2500)
+        pg.goto('http://localhost:8093/?dev=1'); pg.wait_for_timeout(2500)
         pg.screenshot(path=f'{OUT}/chain-{tag}-8-simulator-mode.png')
     b.close()
 print('errors:', errs)

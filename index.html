@@ -1,46 +1,73 @@
 <!doctype html>
 <html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PAPER10K — simulated perps, up to 10000x (paper trading)</title>
-<meta name="description" content="Paper trading simulator: synthetic perpetuals priced from Hyperliquid, up to 10000x leverage. Simulated funds only. Not financial advice.">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>10kx — up to 10000x synthetic perps · simulator + testnet</title>
+<meta name="description" content="10kx: synthetic perpetuals priced from Hyperliquid, up to 10000x leverage. Free simulator and a testnet-only on-chain mode. Nearly all 10000x positions are liquidated within seconds.">
+<meta name="theme-color" content="#07090b">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="style.chain.css">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2305080d'/%3E%3Cpath d='M6 22l6-8 5 4 9-11' fill='none' stroke='%2321e6a1' stroke-width='3'/%3E%3C/svg%3E">
-</head><body>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2307090b'/%3E%3Cpath d='M7 8l9 8-9 8M17 8l8 16M25 8l-8 16' fill='none' stroke='%23d4ff3a' stroke-width='2.6' stroke-linecap='square'/%3E%3C/svg%3E">
+</head><body data-view="landing" data-mode="sim">
 <div id="simbar">⚠ PAPER TRADING · SIMULATED FUNDS · NOT FINANCIAL ADVICE — no real money, no wallet, no keys. The house/LP pool and bot traders are simulated too. Nothing here can be withdrawn.</div>
 <div id="poolbar" hidden></div>
 <div id="offline" hidden></div>
-<header>
-  <div class="logo"><span class="mark">▲</span> PAPER<b>10K</b><small>simulator</small></div>
+<div id="ticker" aria-label="live prices"><div id="tickTrack"></div></div>
+
+<nav id="nav">
+  <a class="logo" href="#" id="logo" aria-label="10kx home"><span class="lg1">10k</span><span class="lg2">x</span><i class="cur">_</i></a>
+  <div class="links" id="navLinks">
+    <button data-go="trade" class="on">Trade</button><button data-go="pos">Positions</button><button data-go="lp">House</button><button data-go="board">Leaderboard</button><button data-go="chain">On-chain <em>testnet</em></button>
+  </div>
   <div class="hstats">
     <div><label>Equity</label><span id="hEquity">$1,000.00</span></div>
     <div><label>Available</label><span id="hBal">$1,000.00</span></div>
     <div><label>PnL (run)</label><span id="hPnl">$0.00</span></div>
   </div>
-  <div class="hbtns"><span id="feedPill" class="pill">connecting…</span><button id="btnBoard" class="ghost">🏆 Leaderboard</button><button id="btnShareAcct" class="ghost">📸 PnL card</button><button id="btnReset" class="danger">↺ Reset $1,000</button></div>
-</header>
+  <div class="hbtns">
+    <span id="netPill" class="pill">Simulator</span><span id="feedPill" class="pill">connecting…</span>
+    <button id="btnConnect" class="ghost">Connect</button>
+    <details class="more"><summary aria-label="more">⋯</summary><div><button id="btnBoard" class="ghost">🏆 Leaderboard</button><button id="btnShareAcct" class="ghost">📸 PnL card</button><button id="btnReset" class="danger">↺ Reset $1,000</button></div></details>
+  </div>
+</nav>
 
-<section id="hero">
-  <button id="heroClose" class="x" title="Hide">×</button>
-  <div class="hero-in">
-    <p class="eyebrow">synthetic perpetuals · hyperliquid prices · simulated</p>
-    <h1>Trade up to <em>10000x</em>.<br>Lose it all in <em>0.009%</em>.</h1>
-    <p class="sub">A paper-trading playground. Real live prices from Hyperliquid, fake $1,000, zero market impact, nothing to lose but your pride.</p>
-    <div class="stats"><div><b>10000x</b><span>max leverage</span></div><div><b>0</b><span>market impact · fills at mid</span></div><div><b>100%</b><span>simulated · state lives in your browser</span></div></div>
-    <a class="cta" href="#terminal" id="ctaStart">Start trading ↓</a>
+<section id="landing">
+  <canvas id="ascii" aria-hidden="true"></canvas>
+  <div class="land-in">
+    <div class="land-copy">
+      <h1 class="wordmark"><span>10k</span><span class="xx">x</span><i class="cur">_</i></h1>
+      <ul class="props">
+        <li><b>10000x</b> leverage</li>
+        <li><b>0</b> market impact · fills at the live mid</li>
+        <li><b>free</b> simulator · <b>testnet</b> on-chain</li>
+        <li><b>0.009%</b> and your margin is gone</li>
+      </ul>
+      <div class="btns"><button class="brk" id="goTrade">[ TRADE ]</button><button class="brk" id="goChain">[ ON-CHAIN TESTNET ]</button><a class="brk" href="https://github.com/StaRKCrypto/paper10k#readme" target="_blank" rel="noopener">[ DOCS ]</a></div>
+      <p class="warn"><b>Honest odds:</b> nearly all 10000x positions are liquidated within seconds. That is the product. Start with the simulator.</p>
+    </div>
+    <div class="land-card" aria-label="live preview">
+      <div class="lc-h"><b id="lcSym">BTC</b><span id="lcPx">—</span><span id="lcChg" class="chg">—</span></div>
+      <canvas id="lcChart"></canvas>
+      <div class="lc-f"><span>10000x long → liquidation at</span><b id="lcLiq" class="dn">—</b></div>
+    </div>
+  </div>
+  <div class="land-cards">
+    <div><h3>Simulator</h3><p>Fake $1,000, live Hyperliquid prices, a simulated house pool and bot traders. No wallet. Lives in your browser.</p><span class="tagok">open now</span></div>
+    <div><h3>Testnet on-chain</h3><p>Real Solidity contracts on a test network, worthless test tokens, injected wallet or WalletConnect. PAPER10KX points token minted on liquidation.</p><span class="tagok">testnet only</span></div>
+    <div><h3>Mainnet</h3><p>Not enabled in this build. Needs independent audits, legal review and an owner-run deploy. See MAINNET_LAUNCH.md.</p><span class="taglock">🔒 locked</span></div>
   </div>
 </section>
 
+<div id="chainbarSlot"></div>
+
 <main id="terminal">
-  <aside id="markets"><h3>Markets</h3><div id="mlist"></div></aside>
+  <aside id="markets"><div id="mlist"></div></aside>
   <section id="center">
-    <div class="mhead"><div><h2 id="mSym">BTC-PERP</h2><span class="tag">synthetic</span></div><div id="mPrice" class="big">—</div><div id="mChg" class="chg">—</div><div id="mFund" class="muted"></div>
+    <div class="mhead"><div class="msym"><h2 id="mSym">BTC-PERP</h2><span class="tag">synthetic</span></div><div id="mPrice" class="big">—</div><div id="mChg" class="chg">—</div><div id="mFund" class="muted"></div>
       <div class="tfs" id="tfs"><button data-tf="1m" class="on">1m</button><button data-tf="5m">5m</button><button data-tf="15m">15m</button><button data-tf="1h">1h</button></div></div>
     <canvas id="chart"></canvas>
-    <div class="tabs" id="tabs"><button data-t="pos" class="on">Positions <i id="nPos">0</i></button><button data-t="ord">Open orders <i id="nOrd">0</i></button><button data-t="hist">Trade history</button><button data-t="board">Leaderboard</button><button data-t="lp" id="tabLp">🏦 LP / House</button></div>
-    <div id="tabBody" class="tabbody"></div>
   </section>
   <aside id="ticket">
+    <div class="acct"><div><label>Equity</label><b data-mirror="hEquity">—</b></div><div><label>Available</label><b data-mirror="hBal">—</b></div><div><label>PnL</label><b data-mirror="hPnl">—</b></div></div>
     <div class="seg" id="sideSeg"><button data-s="long" class="on long">Long</button><button data-s="short" class="short">Short</button></div>
     <div class="seg small" id="typeSeg"><button data-o="market" class="on">Market</button><button data-o="limit">Limit</button></div>
     <label class="f" id="limitRow" hidden>Limit price (USD)<input id="limitPx" type="number" step="any"></label>
@@ -48,6 +75,7 @@
     <div class="chips" id="pcts"><button data-p="25">25%</button><button data-p="50">50%</button><button data-p="75">75%</button><button data-p="100">Max</button></div>
     <label class="f">Leverage <b id="levTxt">100x</b>
       <input id="levRange" type="range" min="0" max="1000" value="500">
+      <span class="ends"><span>x1 safe</span><span>wild x10000</span></span>
       <input id="levNum" type="number" min="1" max="10000" step="1" value="100"></label>
     <div class="chips" id="levChips"><button>1</button><button>10</button><button>100</button><button>1000</button><button>5000</button><button>10000</button></div>
     <div id="riskNote" class="risk"></div>
@@ -57,13 +85,19 @@
       <dt>House max size</dt><dd id="qPool">—</dd><dt>Fee (3.5 bps, open)</dt><dd id="qFee">—</dd><dt>Funding (sim, /h)</dt><dd id="qFund">—</dd>
     </dl>
     <button id="submit" class="go long">Buy / Long</button>
-    <p class="fine">You trade against a simulated house pool (see LP tab). Paper trading · simulated funds · not financial advice. Isolated margin; liquidation forfeits the margin. Fees and funding are simulated.</p>
+    <p class="fine">Nearly all 10000x positions are liquidated within seconds. You trade against a simulated house pool (see House). Paper trading · simulated funds · not financial advice. Isolated margin; liquidation forfeits the margin.</p>
   </aside>
+  <section id="lower">
+    <div class="tabs" id="tabs"><button data-t="pos" class="on">Positions <i id="nPos">0</i></button><button data-t="ord">Open orders <i id="nOrd">0</i></button><button data-t="hist">Trade history</button><button data-t="board">Leaderboard</button><button data-t="lp" id="tabLp">🏦 LP / House</button></div>
+    <div id="tabBody" class="tabbody"></div>
+  </section>
 </main>
-<footer>PAPER10K is an educational simulator inspired by synthetic-perp exchanges. Prices: Hyperliquid public API (Binance public fallback). No trackers, no wallets, no real money. <a href="https://github.com/StaRKCrypto/paper10k" target="_blank" rel="noopener">source</a></footer>
+<footer>10kx (PAPER10K) is an educational simulator plus a testnet-only on-chain demo, inspired by synthetic-perp exchanges. Prices: Hyperliquid public API (Binance public fallback). No trackers. <a href="https://github.com/StaRKCrypto/paper10k" target="_blank" rel="noopener">source</a> · <a href="https://github.com/StaRKCrypto/paper10k/blob/main/AUDIT.md" target="_blank" rel="noopener">self-audit (AI, not independent)</a> · <a href="https://github.com/StaRKCrypto/paper10k/blob/main/MAINNET_LAUNCH.md" target="_blank" rel="noopener">mainnet checklist</a></footer>
 
+<button id="heroClose" hidden></button><a id="ctaStart" hidden></a><div id="hero" hidden></div>
 <div id="toasts"></div>
 <div id="modal" hidden><div class="mbox"><button class="x" id="mClose">×</button><div id="mBody"></div><canvas id="cardCv"></canvas><div class="mbtns"><button id="mDl" class="go long">⬇ Download PnL card</button><button id="mOk" class="ghost">Close</button></div></div></div>
 <script type="module" src="src/app.js"></script>
 <script type="module" src="src/chain/onchain.js"></script>
+<script type="module" src="src/ui10k.js"></script>
 </body></html>
