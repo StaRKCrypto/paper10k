@@ -82,12 +82,12 @@ export function closePosition(state, id, price, now, reason = 'close') {
     pnlRaw = upnl(p, price);
   } else {
     proceeds = Math.max(0, p.margin + pnlRaw - p.funding); // isolated: loss capped at margin
-    closeFee = fee(p.size * price);
+    closeFee = reason === 'close' ? fee(p.size * price) : 0; // 'adl' (auto-deleverage) closes are fee-free
     closeFee = Math.min(closeFee, proceeds); // never push balance below what the position returned
   }
   state.balance += proceeds - closeFee;
   const pnl = (reason === 'liquidation' ? -p.margin : proceeds - p.margin) - p.openFee - closeFee;
-  const rec = { id: p.id, sym: p.sym, side: p.side, lev: p.lev, size: p.size, margin: p.margin, entry: p.entry, exit: price, openedAt: p.openedAt, closedAt: now, pnl, funding: p.funding, fees: p.openFee + closeFee, reason };
+  const rec = { id: p.id, sym: p.sym, side: p.side, lev: p.lev, size: p.size, margin: p.margin, entry: p.entry, exit: price, openedAt: p.openedAt, closedAt: now, pnl, funding: p.funding, fees: p.openFee + closeFee, openFee: p.openFee, closeFee, proceeds, reason };
   state.history.unshift(rec);
   if (state.history.length > 500) state.history.length = 500;
   if (reason === 'liquidation') state.liquidations++;
@@ -104,8 +104,8 @@ export function accrueFunding(p, mark, now) {
  * Advance the sim. marks: {sym: price}, rates: {sym: hourlyRate}. Returns events [{type, ...}].
  * Liquidation is checked first; liquidated positions close at their liquidation price.
  */
-export function tick(state, marks, rates, now) {
-  const events = [];
+export function tick(state, marks, rates, now, hooks = {}) {
+  const events = [], emit = (e) => { events.push(e); hooks.onEvent?.(e); };
   for (const p of [...state.positions]) {
     const m = marks[p.sym];
     if (!(m > 0)) continue;
@@ -114,7 +114,7 @@ export function tick(state, marks, rates, now) {
     p.mark = m;
     if (isLiquidated(p, m)) {
       const rec = closePosition(state, p.id, m, now, 'liquidation');
-      events.push({ type: 'liquidation', rec });
+      emit({ type: 'liquidation', rec });
     }
   }
   for (const o of [...state.orders]) {
@@ -123,12 +123,13 @@ export function tick(state, marks, rates, now) {
     const hit = o.side === 'long' ? m <= o.limitPrice : m >= o.limitPrice;
     if (!hit) continue;
     state.orders.splice(state.orders.indexOf(o), 1);
-    const n = o.margin * o.lev;
+    const why = hooks.gate ? hooks.gate(o, m) : null; // venue risk gate (caps); rejected orders are refunded
+    if (why) { state.balance += o.margin + fee(o.margin * o.lev); emit({ type: 'reject', order: o, reason: why }); continue; }
     // reserved margin+fee already deducted; open directly at limit price
     const p = openAt(state, { sym: o.sym, side: o.side, margin: o.margin, lev: o.lev, price: o.limitPrice, now, fundingRate: rates?.[o.sym] });
     p.mark = m;
-    events.push({ type: 'fill', position: p });
-    if (isLiquidated(p, m)) events.push({ type: 'liquidation', rec: closePosition(state, p.id, m, now, 'liquidation') });
+    emit({ type: 'fill', position: p });
+    if (isLiquidated(p, m)) emit({ type: 'liquidation', rec: closePosition(state, p.id, m, now, 'liquidation') });
   }
   return events;
 }

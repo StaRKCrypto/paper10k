@@ -6,7 +6,8 @@
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2305080d'/%3E%3Cpath d='M6 22l6-8 5 4 9-11' fill='none' stroke='%2321e6a1' stroke-width='3'/%3E%3C/svg%3E">
 </head><body>
-<div id="simbar">⚠ PAPER TRADING · SIMULATED FUNDS · NOT FINANCIAL ADVICE — no real money, no wallet, no keys. Nothing here can be withdrawn.</div>
+<div id="simbar">⚠ PAPER TRADING · SIMULATED FUNDS · NOT FINANCIAL ADVICE — no real money, no wallet, no keys. The house/LP pool and bot traders are simulated too. Nothing here can be withdrawn.</div>
+<div id="poolbar" hidden></div>
 <div id="offline" hidden></div>
 <header>
   <div class="logo"><span class="mark">▲</span> PAPER<b>10K</b><small>simulator</small></div>
@@ -35,7 +36,7 @@
     <div class="mhead"><div><h2 id="mSym">BTC-PERP</h2><span class="tag">synthetic</span></div><div id="mPrice" class="big">—</div><div id="mChg" class="chg">—</div><div id="mFund" class="muted"></div>
       <div class="tfs" id="tfs"><button data-tf="1m" class="on">1m</button><button data-tf="5m">5m</button><button data-tf="15m">15m</button><button data-tf="1h">1h</button></div></div>
     <canvas id="chart"></canvas>
-    <div class="tabs" id="tabs"><button data-t="pos" class="on">Positions <i id="nPos">0</i></button><button data-t="ord">Open orders <i id="nOrd">0</i></button><button data-t="hist">Trade history</button><button data-t="board">Leaderboard</button></div>
+    <div class="tabs" id="tabs"><button data-t="pos" class="on">Positions <i id="nPos">0</i></button><button data-t="ord">Open orders <i id="nOrd">0</i></button><button data-t="hist">Trade history</button><button data-t="board">Leaderboard</button><button data-t="lp" id="tabLp">🏦 LP / House</button></div>
     <div id="tabBody" class="tabbody"></div>
   </section>
   <aside id="ticket">
@@ -52,10 +53,10 @@
     <dl class="quote">
       <dt>Entry (mid)</dt><dd id="qEntry">—</dd><dt>Notional</dt><dd id="qNot">—</dd><dt>Size</dt><dd id="qSize">—</dd>
       <dt>Liquidation price</dt><dd id="qLiq" class="liq">—</dd><dt>Liq. distance</dt><dd id="qDist">—</dd>
-      <dt>Fee (3.5 bps, open)</dt><dd id="qFee">—</dd><dt>Funding (sim, /h)</dt><dd id="qFund">—</dd>
+      <dt>House max size</dt><dd id="qPool">—</dd><dt>Fee (3.5 bps, open)</dt><dd id="qFee">—</dd><dt>Funding (sim, /h)</dt><dd id="qFund">—</dd>
     </dl>
     <button id="submit" class="go long">Buy / Long</button>
-    <p class="fine">Paper trading · simulated funds · not financial advice. Isolated margin; liquidation forfeits the margin. Fees and funding are simulated.</p>
+    <p class="fine">You trade against a simulated house pool (see LP tab). Paper trading · simulated funds · not financial advice. Isolated margin; liquidation forfeits the margin. Fees and funding are simulated.</p>
   </aside>
 </main>
 <footer>PAPER10K is an educational simulator inspired by synthetic-perp exchanges. Prices: Hyperliquid public API (Binance public fallback). No trackers, no wallets, no real money. <a href="https://github.com/StaRKCrypto/paper10k" target="_blank" rel="noopener">source</a></footer>
