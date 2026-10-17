@@ -4,6 +4,7 @@
 <title>PAPER10K — simulated perps, up to 10000x (paper trading)</title>
 <meta name="description" content="Paper trading simulator: synthetic perpetuals priced from Hyperliquid, up to 10000x leverage. Simulated funds only. Not financial advice.">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.chain.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2305080d'/%3E%3Cpath d='M6 22l6-8 5 4 9-11' fill='none' stroke='%2321e6a1' stroke-width='3'/%3E%3C/svg%3E">
 </head><body>
 <div id="simbar">⚠ PAPER TRADING · SIMULATED FUNDS · NOT FINANCIAL ADVICE — no real money, no wallet, no keys. The house/LP pool and bot traders are simulated too. Nothing here can be withdrawn.</div>
@@ -64,4 +65,5 @@
 <div id="toasts"></div>
 <div id="modal" hidden><div class="mbox"><button class="x" id="mClose">×</button><div id="mBody"></div><canvas id="cardCv"></canvas><div class="mbtns"><button id="mDl" class="go long">⬇ Download PnL card</button><button id="mOk" class="ghost">Close</button></div></div></div>
 <script type="module" src="src/app.js"></script>
+<script type="module" src="src/chain/onchain.js"></script>
 </body></html>

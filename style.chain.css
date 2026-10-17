@@ -1,0 +1,22 @@
+#chainbar{display:flex;gap:12px;align-items:center;padding:6px 14px;background:#0b1118;border-bottom:1px solid #1d2733;font-size:12px;flex-wrap:wrap}
+#chainbar .seg2 button{background:#121b25;border:1px solid #243242;color:#9fb3c8;padding:6px 12px;cursor:pointer}
+#chainbar .seg2 button.on{background:#21e6a1;color:#04130d;font-weight:700}
+#simbar.testnet{background:#5a3b00;color:#ffe3a3;border-bottom:2px solid #ffb020;font-weight:700}
+#chainpanel{padding:14px;max-width:1300px;margin:0 auto}
+#chainpanel .cbanner{background:#5a3b00;color:#ffe3a3;border:2px solid #ffb020;padding:10px 14px;font-weight:700;margin-bottom:12px;border-radius:6px}
+#chainpanel .cbanner.main{background:#5a0f0f;color:#ffd0d0;border-color:#ff4d4d}
+#chainpanel .cgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+#chainpanel .ccard{background:#0d141c;border:1px solid #1d2733;border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:8px}
+#chainpanel .ccard.wide{margin-top:12px}
+#chainpanel .ccard h3{margin:0 0 4px;font-size:14px;color:#cfe3f7}
+#chainpanel button{cursor:pointer}
+#chainpanel button.sm{padding:3px 8px;font-size:11px}
+#chainpanel .wcbox textarea{width:100%;font-size:10px;background:#05080d;color:#9fb3c8;border:1px solid #243242}
+#chainpanel .wcbox svg{width:180px;height:180px;background:#fff}
+#chainpanel .tbl{width:100%;border-collapse:collapse;font-size:12px}
+#chainpanel .tbl th,#chainpanel .tbl td{padding:5px 8px;text-align:left;border-bottom:1px solid #1d2733}
+#chainpanel .ctrust{margin-top:14px;opacity:.8}
+#chainpanel code{font-size:11px}
+#ctoasts{position:fixed;right:12px;bottom:12px;display:flex;flex-direction:column;gap:6px;z-index:99}
+.ctoast{background:#12202c;border:1px solid #21e6a1;color:#dff;padding:8px 12px;border-radius:6px;font-size:12px;max-width:360px}
+.ctoast.bad{border-color:#ff4d4d;background:#2c1212}

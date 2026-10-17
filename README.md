@@ -68,3 +68,13 @@ Let `M` margin, `L` leverage, `N = M·L` notional, `size = N / entry`, `k = 0.10
 - State is per-browser localStorage (clearing site data erases it); leaderboard is local only.
 - Simulation pauses while the tab is closed (funding accrues by wall-clock when reopened; liquidations only evaluated against live ticks).
 - `HYPE`/others are not listed; markets are a fixed list in `src/feed.js`.
+
+
+---
+## ⛓ On-chain TESTNET mode (new, branch `wallet-testnet`)
+The simulator is unchanged. A second mode, **On-chain (testnet)**, adds wallet connect (EIP-1193 injected + vendored WalletConnect, no trackers), a network check,
+and Solidity contracts (`contracts/`): house pool + isolated-margin perps up to 10000x, signed-price oracle, and **PAPER10KX** (no-value points token minted to a trader on liquidation).
+- **Testnet only. No real funds.** Mainnet support exists in code but is **OFF** (`MAINNET_ENABLED=false`) and has never been deployed — see `MAINNET_LAUNCH.md`.
+- `DOCS_ANALYSIS.md` (papertrade.xyz teardown) · `TESTNET.md` (deploy/run) · `AUDIT.md` (**AI self-audit, not independent**) · `MAINNET_LAUNCH.md` (audit/legal/oracle/insolvency checklist + deploy commands).
+- Tests: `cd contracts && forge test` (unit/fuzz/invariant) · `node --test test/` · local e2e: `tools/e2e-local.sh && python3 tools/e2e-shots.py`.
+- Honest risk copy: nearly all 10000x positions are liquidated within seconds.
