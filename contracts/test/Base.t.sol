@@ -34,7 +34,8 @@ abstract contract Base is Test {
         p = Paper10kExchange.Params({maxLeverage: 10_000, maintBps: 1000, winFeeBps: 200, insuranceBps: 1000, maxProfitMult: 100,
             rateMultiplier: 1000, mintPerCollateral: 100, deadbandWad: 2e12, baseRateWad: 0, minMargin: 1e6, maxMarginPerPosition: 1_000e6});
     }
-    function defOps() internal pure returns (Paper10kExchange.Ops memory o) { o = Paper10kExchange.Ops({maxTotalDeposits: 1_000_000e6, maxPriceAge: 30, minHold: 3}); }
+    uint16 internal bBps; uint128 internal bCap; // liquidation bounty settings used by defOps (0 by default = legacy numbers)
+    function defOps() internal view returns (Paper10kExchange.Ops memory o) { o = Paper10kExchange.Ops({maxTotalDeposits: 1_000_000e6, maxPriceAge: 30, minHold: 3, bountyBps: bBps, bountyCap: bCap}); }
 
     function setUp() public virtual {
         vm.warp(1_000_000); vm.roll(100);
@@ -62,6 +63,8 @@ abstract contract Base is Test {
         vm.prank(who); ex.liquidate(id);
     }
     function _markBlock(uint256 id) internal view returns (uint32 b) { (b,) = ex.marks(id); }
+    /// via-IR note: cheatcode-adjacent `block.*` reads can be cached by the compiler inside one function; use real reads here
+    function _adv(uint256 blocks, uint256 secs) internal { vm.roll(vm.getBlockNumber() + blocks); vm.warp(vm.getBlockTimestamp() + secs); }
     function _next() internal { vm.warp(block.timestamp + 5); vm.roll(block.number + 1); }
     function _solvent() internal view {
         assertGe(usdc.balanceOf(address(ex)), ex.totalFree() + ex.totalMargin() + ex.pool() + ex.insurance());

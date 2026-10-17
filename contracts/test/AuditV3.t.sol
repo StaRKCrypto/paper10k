@@ -25,21 +25,21 @@ contract AuditV3Test is Base {
         vm.expectRevert(bytes("timelocked")); h.setGuards(200, 500, IPriceOracle(address(0)), 500, 600);
         h.proposeMarket(0, 1, 4);
         vm.expectRevert(bytes("delay")); h.applyMarket(0);
-        vm.warp(block.timestamp + 1 days - 1);
+        vm.warp(vm.getBlockTimestamp() + 1 days - 1);
         vm.expectRevert(bytes("delay")); h.applyMarket(0);
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         h.applyMarket(0);
         (uint32 asset, uint8 sz, bool on) = h.mkt(0);
         assertEq(asset, 1); assertEq(sz, 4); assertTrue(on);
         // guards
         h.proposeGuards(100, 300, IPriceOracle(address(0)), 100, 30);
         vm.expectRevert(bytes("delay")); h.applyGuards();
-        vm.warp(block.timestamp + 1 days);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
         h.applyGuards();
         assertEq(h.maxSpreadBps(), 100); assertEq(h.maxDevBps(), 300);
         // cancel works, and proposals validate bounds
         h.proposeMarket(0, 2, 3); h.cancelMarket(0);
-        vm.warp(block.timestamp + 2 days);
+        vm.warp(vm.getBlockTimestamp() + 2 days);
         vm.expectRevert(bytes("delay")); h.applyMarket(0);
         vm.expectRevert(bytes("bps")); h.proposeGuards(0, 100, IPriceOracle(address(0)), 100, 30);
         vm.stopPrank();

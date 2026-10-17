@@ -37,7 +37,8 @@ contract Deploy is Script {
         });
         c.o = Paper10kExchange.Ops({
             maxTotalDeposits: uint128(vm.envOr("TVL_CAP", c.testnet ? uint256(1_000_000e6) : uint256(5_000e6))),
-            maxPriceAge: 30, minHold: uint64(vm.envOr("MIN_HOLD", uint256(3)))
+            maxPriceAge: 30, minHold: uint64(vm.envOr("MIN_HOLD", uint256(3))),
+            bountyBps: uint16(vm.envOr("BOUNTY_BPS", uint256(200))), bountyCap: uint128(vm.envOr("BOUNTY_CAP", uint256(10e6)))
         });
         if (c.testnet) {
             c.useHL = id == 998 && vm.envOr("USE_HYPERCORE_ORACLE", false);

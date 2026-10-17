@@ -1,3 +1,32 @@
+# AUDIT.md — v5 (AI review: liquidation bounty + keeper)
+
+> **AI review, not a professional audit; no assurance; same AI toolchain wrote and reviewed this code. Not a substitute for an independent audit and legal review. Nothing deployed; mainnet flag OFF; no funded keys.**
+
+## Design chosen (and why it is the safest I could find)
+* **Bounty = `min(margin × bountyBps / 1e4, bountyCap)`**, `bountyBps ≤ 1000` (10 %, enforced in `_validate`), deploy defaults **2 % capped at 10 USDC** (`BOUNTY_BPS`, `BOUNTY_CAP` env in the Deploy script). It lives in `Ops` (timelocked like the other operational limits).
+* **Funded only from the liquidated margin, never from insurance or the pool.** `_inflow` now receives `margin − bounty`; PAPER10KX still mints on the *full* margin. Because `bountyBps ≤ 10 %` the bounty can never exceed the margin, so it can never exceed "available funds" (there is a redundant `bounty ≤ margin` clamp). The bounty is credited to the liquidator's **internal free balance** (`free`/`totalFree`), not transferred: no external call, no reentrancy surface, no token-blacklist DoS on liquidation.
+* **No bounty when `keeper == position owner`** (covers `liquidate()` by the owner and a voluntary `close()` that becomes a hard bust).
+* **Why farming cannot profit:** the bounty is a fraction (≤10 %) of margin the trader has *already lost*. A trader who liquidates himself through a second address recovers at most `bountyBps × margin` and loses the rest, so his total balance strictly decreases (regression `testFuzz_sybilSelfLiquidationNeverProfits`: random margin, address, bps ≤ 10 %, cap → total balance across both addresses strictly lower and loss == margin − bounty). The only way to "profit" would be to be paid by someone *else's* loss, which is the intended keeper role. PAPER10KX farming is unchanged (costs the margin; cheaper by ≤ the bounty but token has no value).
+* New event `BountyPaid(id, keeper, amount)`; `Liquidated` is unchanged (frontend topic stable).
+
+## Tests (70 pass, incl. 5,000 fuzz runs and 300×100 invariant runs)
+`AuditV5.t.sol`: exact bounty from margin; cap; no bounty for self-liquidation and for owner hard-bust close; bps validation; insurance never reduced by a liquidation; **fuzz exact split** (any margin/bps/cap/caller: `pool+insurance Δ + bounty == margin`, bounty == min(…) or 0 for the owner); **fuzz sybil**. Invariants (with bounty enabled in the invariant suite): *bounty never exceeds min(2 % margin, cap)* and *position owners never earn a bounty on their own liquidation*, plus all previous invariants (exact cash conservation etc.). Mutation checks (caught): bounty paid to the owner too; cap removed. Slither: **0 high / 0 medium**; new informational: an intentionally zero-initialised local (`bounty`, `ts`).
+
+## Findings in this pass
+| # | Sev | Finding | Status |
+|---|---|---|---|
+| F11 | **High (deployability)** | **`Paper10kExchange` runtime size was 24,888 bytes — above the 24,576-byte EIP-170 limit.** It deploys in `forge test` (limit disabled) but **cannot be deployed on any real EVM chain, including HyperEVM testnet/mainnet and anvil**; found only because the keeper e2e deployed it for real. | **Fixed:** `foundry.toml` now compiles with `via_ir = true` (19,784 bytes, 4.8 kB headroom); the full suite, fuzz and invariants were re-run on the via-IR build. Test code that did `vm.roll(block.number + 1)` twice in one function was changed to `vm.getBlockNumber()/getBlockTimestamp()` because via-IR can cache `block.*` reads across cheatcodes (a *test* artefact, the contracts read the opcode per call). Compile time is ~85 s cold. |
+| F12 | Low | `tools/e2e-local.sh` used `CONFIG_DELAY=2`, rejected since the v3 5-minute delay floor. | Fixed (300 s + `evm_increaseTime`). |
+| F13 | Info | Bounty economics vs sniping: marking pays nothing, so a rival can liquidate a position you marked (free-riding the marker's gas); with only the liquidator paid, marking is a public good that a single keeper does for its own liquidations. | Accepted; documented in keeper README. |
+| F14 | Info | A keeper's bounty accrues as exchange free balance (needs `withdraw`). | By design. |
+
+## Keeper (`keeper/`) review notes
+Viem-only dependency, no telemetry, key read **only** from `KEEPER_PRIVATE_KEY` (validated without echo, never logged, `.gitignore` blocks `keeper/.env*` and `*.key`), forced dry-run without a key, refuses chain 999 without an explicit acknowledgement flag, simulates before every send, gas-price cap, one tx at a time (no nonce races), retry/backoff only for RPC errors, decisions use **chain** time. Verified end-to-end on local anvil (dry-run, gas cap, clearMark on recovery, live mark → ≥2 blocks → liquidate ×4, exact bounty/house accounting). **Limits:** polling (a faster rival wins), no mempool/private orderflow, no multicall batching, no EIP-1559 tip logic, never run against real HyperCore precompiles or a public RPC with log-range limits.
+
+## Unverified (v5)
+Bounty sizing vs real gas/competition on HyperEVM (2 %/10 USDC are guesses; at 10,000× and 1–50 USDC margins the bounty is 0.02–1 USDC); whether the keeper keeps up with real liquidation volume; via-IR build behaviour on real HyperEVM (only anvil + Foundry tested); everything from v3/v4 "unverified" still applies; no human audit, no legal review.
+
+---
 # AUDIT.md — v4 (AI review: owner decision on F5 implemented, plus F7/F8)
 
 > **This is an AI review (Grok Bot), not a human or professional audit; no assurance. The same AI toolchain wrote and reviewed this code. It does NOT replace an independent audit and legal review.

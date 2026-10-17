@@ -10,7 +10,7 @@ RPC=http://127.0.0.1:8545
 pkill -f "anvil --port 8545" 2>/dev/null || true; pkill -f price-relayer 2>/dev/null || true
 (anvil --port 8545 --block-time 1 >/tmp/anvil.log 2>&1 &); sleep 2
 cd contracts
-OUT=$(OWNER=$A0 ORACLE_SIGNER=$A0 CONFIG_DELAY=2 forge script script/Deploy.s.sol --rpc-url $RPC --private-key $K0 --broadcast 2>&1)
+OUT=$(OWNER=$A0 ORACLE_SIGNER=$A0 CONFIG_DELAY=300 forge script script/Deploy.s.sol --rpc-url $RPC --private-key $K0 --broadcast 2>&1)
 get() { echo "$OUT" | grep -E "^ +$1 " | awk '{print $2}'; }
 USDC=$(get TestUSDC); ORC=$(get Oracle); PX=$(get PAPER10KX); EX=$(get Exchange)
 BLK=$(cast block-number --rpc-url $RPC)
@@ -19,7 +19,7 @@ $S $PX "acceptOwnership()" >/dev/null
 # markets are timelocked (CONFIG_DELAY=2s on this throwaway chain; 2 days on mainnet)
 $S $EX "proposeMarket(uint32,bool,uint256,uint256)" 0 true 1000000000000 1000000000000 >/dev/null
 $S $EX "proposeMarket(uint32,bool,uint256,uint256)" 1 true 1000000000000 1000000000000 >/dev/null
-sleep 4
+cast rpc evm_increaseTime 301 --rpc-url $RPC >/dev/null; cast rpc evm_mine --rpc-url $RPC >/dev/null; sleep 1
 $S $EX "applyMarket(uint32)" 0 >/dev/null; $S $EX "applyMarket(uint32)" 1 >/dev/null
 $S $USDC "faucet()" >/dev/null; $S $USDC "approve(address,uint256)" $EX 10000000000 >/dev/null; $S $EX "seedPool(uint256)" 10000000000 >/dev/null
 $S $EX "unpause()" >/dev/null

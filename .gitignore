@@ -1,3 +1,10 @@
 node_modules
 tools/node_modules/
 deployments.local.json
+
+# keeper secrets: never commit
+keeper/.env
+keeper/.env.*
+!keeper/.env.example
+*.key
+*.pem

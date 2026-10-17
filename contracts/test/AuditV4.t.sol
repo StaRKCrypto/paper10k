@@ -37,9 +37,9 @@ contract AuditV4Test is Base {
         ex.markLiquidatable(id);
         uint32 mb = _markBlock(id); assertEq(mb, uint32(block.number));
         vm.expectRevert(Paper10kExchange.MarkNotReady.selector); ex.liquidate(id);   // same block
-        vm.roll(block.number + 1); vm.warp(block.timestamp + 1);
+        _adv(1, 1);
         vm.expectRevert(Paper10kExchange.MarkNotReady.selector); ex.liquidate(id);   // 1 block
-        vm.roll(block.number + 1); vm.warp(block.timestamp + 1);
+        _adv(1, 1);
         ex.liquidate(id);                                                            // 2 blocks
         assertGt(x.balanceOf(alice), 0);
         assertEq(_markBlock(id), 0);                                                 // mark deleted with the position

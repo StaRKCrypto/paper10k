@@ -15,7 +15,7 @@ contract Handler is Base {
     uint256 public nOpen; uint256 public nLiq; uint256 public nClose; uint256 public nCfg; uint256 public nWd;
     uint256 public maxVersionSeen;
 
-    function init(Paper10kExchange e, MockOracle o, address[3] memory u, address own, address t) external { ex = e; orc = o; users = u; owner = own; usdc = TestUSDC_(t); }
+    function init(Paper10kExchange e, MockOracle o, address[3] memory u, address own, address t) external { bBps = 200; bCap = 10e6; ex = e; orc = o; users = u; owner = own; usdc = TestUSDC_(t); }
     // (type alias to avoid importing twice)
     function dep(uint256 u, uint256 a) external { address x_ = users[u % 3]; a = bound(a, 1e6, 500e6); vm.prank(x_); try ex.deposit(a) {} catch {} }
     function wd(uint256 u, uint256 a) external { address x_ = users[u % 3]; a = bound(a, 1, 500e6); vm.prank(x_); try ex.withdraw(a) {} catch {} }
@@ -33,8 +33,20 @@ contract Handler is Base {
         if (ids.length == 0) return; uint256 id = ids[i % ids.length]; address o = ex.positionOwner(id);
         vm.prank(o); try ex.close(id) { nClose++; } catch {} _settled(id);
     }
-    function liq(uint256 i) external { if (ids.length == 0) return; uint256 id = ids[i % ids.length]; try ex.markLiquidatable(id) {} catch {} vm.roll(block.number + 2); vm.warp(block.timestamp + 2); orc.set(0, orc.px(0)); try ex.liquidate(id) { nLiq++; } catch {} _settled(id); }
-    bool public badLiq; bool public ownerBreach;
+    function liq(uint256 i) external { if (ids.length == 0) return; uint256 id = ids[i % ids.length]; try ex.markLiquidatable(id) {} catch {} vm.roll(block.number + 2); vm.warp(block.timestamp + 2); orc.set(0, orc.px(0));
+        uint256 f0 = ex.free(address(this)); uint256 m = marginOf[id];
+        try ex.liquidate(id) {
+            nLiq++; uint256 d = ex.free(address(this)) - f0; bountyTotal += d;
+            uint256 max = m * 200 / 10_000; if (max > 10e6) max = 10e6;
+            if (d > max) badBounty = true;
+        } catch {} _settled(id); }
+    /// owner of the position liquidates it himself: must earn nothing
+    function selfLiq(uint256 i) external {
+        if (ids.length == 0) return; uint256 id = ids[i % ids.length]; address o = ex.positionOwner(id); if (o == address(0)) return;
+        try ex.markLiquidatable(id) {} catch {} vm.roll(block.number + 2); vm.warp(block.timestamp + 2); orc.set(0, orc.px(0));
+        uint256 f0 = ex.free(o);
+        vm.prank(o); try ex.liquidate(id) { nLiq++; if (ex.free(o) != f0) badBounty = true; } catch {} _settled(id); }
+    bool public badLiq; bool public ownerBreach; bool public badBounty; uint256 public bountyTotal;
     function mark(uint256 i) external { if (ids.length == 0) return; try ex.markLiquidatable(ids[i % ids.length]) {} catch {} }
     function nudge(int256 bps) external { bps = bound(bps, -50, 50); uint256 p = orc.px(0); orc.setLiq(0, uint256(int256(p) + int256(p) * bps / 10_000)); }
     function liqEarly(uint256 i) external {
@@ -64,14 +76,15 @@ import {TestUSDC as TestUSDC_} from "../src/testnet/TestUSDC.sol";
 contract InvariantTest is StdInvariant, Base {
     Handler h;
     function setUp() public override {
+        bBps = 200; bCap = 10e6;
         super.setUp();
         h = new Handler();
         h.init(ex, orc, [alice, bob, address(0xC0C)], owner, address(usdc));
         _fund(address(0xC0C), 10_000e6);
         vm.prank(owner); // handler acts via pranks of users; give each user approvals (done in _fund)
-        bytes4[] memory sel = new bytes4[](13);
+        bytes4[] memory sel = new bytes4[](14);
         sel[0]=Handler.dep.selector; sel[1]=Handler.wd.selector; sel[2]=Handler.open.selector; sel[3]=Handler.mv.selector; sel[4]=Handler.pass.selector;
-        sel[5]=Handler.cls.selector; sel[6]=Handler.liq.selector; sel[7]=Handler.q.selector; sel[8]=Handler.cfg.selector; sel[9]=Handler.ownerWd.selector; sel[10]=Handler.mark.selector; sel[11]=Handler.nudge.selector; sel[12]=Handler.liqEarly.selector;
+        sel[5]=Handler.cls.selector; sel[6]=Handler.liq.selector; sel[7]=Handler.q.selector; sel[8]=Handler.cfg.selector; sel[9]=Handler.ownerWd.selector; sel[10]=Handler.mark.selector; sel[11]=Handler.nudge.selector; sel[12]=Handler.liqEarly.selector; sel[13]=Handler.selfLiq.selector;
         targetSelector(FuzzSelector({addr: address(h), selectors: sel}));
         bytes4[] memory s2 = new bytes4[](1); s2[0] = Handler.fundIns.selector;
         targetSelector(FuzzSelector({addr: address(h), selectors: s2}));
@@ -129,4 +142,6 @@ contract InvariantTest is StdInvariant, Base {
     }
     /// v4 F7: when owner withdrawals succeeded, house cash still covered the reserve at that time -> checked by Reserved(); here: cash never below reserve unless it was already below before (no owner-caused breach)
     function invariant_ownerNeverCausedReserveBreach() public view { assertFalse(h.ownerBreach()); }
+    /// v5: bounty never exceeds min(2% margin, cap) and self-liquidation never earns one
+    function invariant_bountyBoundedAndNeverSelfPaid() public view { assertFalse(h.badBounty()); }
 }

@@ -81,3 +81,11 @@ Audits closed ✅ · legal opinion ✅ · oracle verified on fork ✅ · monitor
 - **Owner withdrawals are bounded by `reservedLiability()`** (worst case: Σ over markets of max(long, short) of margin × maxProfitMult). Expect `ownerWithdrawable() == 0` while positions are open. Seed the pool/insurance well above the reserve you are willing to underwrite, or lower `maxProfitMult` / OI caps / `maxMarginPerPosition`, otherwise the pool is effectively locked.
 - Closing positions never depends on the liquidation guard; if the *primary* guards trip, all trading halts (see AUDIT v4 limits).
 - Keep: `HyperCoreOracle.finalizeBootstrap()` before `unpause()`, mainnet deadband ≥ 0.2 bps, config delay ≥ 1 day, mainnet flag OFF until an independent audit + legal review.
+
+## v5: keeper + bounty (pre-launch checklist additions)
+- [ ] **Contract size:** build with the repo's `via_ir = true` profile (Exchange ≈ 19.8 kB, limit 24.5 kB). A plain optimizer build is over the limit and will not deploy. Re-check `forge build --sizes` after any change.
+- [ ] **Bounty settings** (`BOUNTY_BPS` ≤ 1000, `BOUNTY_CAP`, defaults 2 % / 10 USDC) chosen against real HyperEVM gas and expected competition; they are `Ops` (timelocked after launch). The bounty comes only from the liquidated margin; it is never paid for self-liquidation.
+- [ ] **Run the keeper** (`keeper/README.md`) from a dedicated throwaway hot key holding only gas; key via env only; start with `--dry-run`; set `MAX_GAS_PRICE_GWEI`; monitor the JSON logs. Run ≥ 2 independent keepers (nobody is obliged to liquidate; the mark TTL is 120 s).
+- [ ] Rehearse on HyperEVM testnet 998 with `HyperCoreOracle` (not the signed oracle): the keeper has only been tested against the signed testnet oracle on anvil.
+- [ ] The keeper refuses chain 999 unless `ALLOW_MAINNET=I_ACCEPT_REAL_FUNDS_RISK`; leave that unset until the owner explicitly decides, after an independent audit and legal review.
+

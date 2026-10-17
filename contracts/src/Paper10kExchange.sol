@@ -48,7 +48,9 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     Params[] public paramsHistory; // index = version; positions snapshot the version at open
 
     // ---------------------------------------------------------------- live ops params (also timelocked)
-    struct Ops { uint128 maxTotalDeposits; uint64 maxPriceAge; uint64 minHold; }
+    // v5: liquidation bounty = min(margin * bountyBps / 1e4, bountyCap), carved from the LIQUIDATED margin only (never insurance), credited to the
+    // liquidator's free balance, 0 if the liquidator is the position owner. bountyBps <= 1000 (10%) is enforced, so the bounty can never exceed the margin.
+    struct Ops { uint128 maxTotalDeposits; uint64 maxPriceAge; uint64 minHold; uint16 bountyBps; uint128 bountyCap; }
     Ops public ops;
 
     struct PendingConfig { Params p; Ops o; uint64 at; bool set; }
@@ -109,6 +111,7 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     event Opened(uint256 indexed id, address indexed user, uint32 market, bool isLong, uint256 margin, uint256 notional, uint256 entry, uint32 leverage);
     event Closed(uint256 indexed id, address indexed user, uint256 exitPrice, uint256 returned, uint256 profitPaid, uint256 profitQueued, uint256 loss);
     event Liquidated(uint256 indexed id, address indexed user, address indexed keeper, uint256 price, uint256 margin, uint256 minted);
+    event BountyPaid(uint256 indexed id, address indexed keeper, uint256 amount);
     event Marked(uint256 indexed id, address indexed by, uint256 price);
     event MarkCleared(uint256 indexed id);
     event EmergencyCancelled(uint256 indexed id, address indexed user, uint256 margin);
@@ -267,7 +270,14 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     function _liquidate(uint256 id, Position memory p, Params memory pr, uint256 price, address keeper) internal {
         _removePosition(id, p);
         totalMargin -= p.margin;
-        _inflow(p.margin, pr.insuranceBps);
+        uint256 bounty;
+        if (keeper != p.owner) { // self-liquidation never earns a bounty
+            bounty = uint256(p.margin) * ops.bountyBps / BPS;
+            if (bounty > ops.bountyCap) bounty = ops.bountyCap;
+            if (bounty > p.margin) bounty = p.margin; // belt and braces (bountyBps <= 10% already)
+        }
+        if (bounty > 0) { free[keeper] += bounty; totalFree += bounty; emit BountyPaid(id, keeper, bounty); }
+        _inflow(p.margin - bounty, pr.insuranceBps);
         uint256 minted = px.mint(p.owner, uint256(p.margin) * mintScale * pr.mintPerCollateral);
         emit Liquidated(id, p.owner, keeper, price, p.margin, minted);
     }
@@ -406,6 +416,7 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         if (p.deadbandWad > 1e16 || p.baseRateWad > 5e17) revert BadParam();
         if (p.minMargin == 0 || p.maxMarginPerPosition < p.minMargin) revert BadParam();
         if (o.maxPriceAge < 5 || o.maxPriceAge > 600 || o.minHold > 600 || o.minHold < 2) revert BadParam();
+        if (o.bountyBps > 1000) revert BadParam();
     }
 
     /// @notice propose new risk params + ops. After `configDelay` anyone-visible window the owner applies; new Params apply ONLY to positions opened afterwards.
