@@ -25,7 +25,7 @@ contract HyperCoreOracleTest is Base {
     function setUp() public override {
         super.setUp();
         bbo = new MockBbo(); opx = new MockOraclePx();
-        h = new HyperCoreOracle(owner, address(bbo), address(opx));
+        h = new HyperCoreOracle(owner, address(bbo), address(opx), 1 days);
         vm.prank(owner); h.configure(0, 0, 5);   // BTC szDecimals=5 -> 1 decimal
         bbo.set(1_000_000, 1_000_010); opx.set(1_000_005);
     }

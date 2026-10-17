@@ -29,28 +29,84 @@ contract HyperCoreOracle is IPriceOracle, Ownable2Step {
     uint256 public maxRefDevBps = 100;
     uint64 public refMaxAge = 30;
 
+    // ---- v3: governance of the oracle itself is timelocked (audit v3 finding F1). `configure`/`setGuards` used to be instant, which let an
+    // oracle owner remap a market to a different HyperCore asset (or loosen guards) with no notice, bypassing the exchange timelock.
+    // Bootstrap window: until `finalizeBootstrap()` the owner may configure instantly (exchange is deployed paused, so nobody is exposed).
+    // After it (one-way) every change goes through propose* -> wait `delay` -> apply*.
+    uint64 public immutable delay;
+    bool public bootstrapped;
+    struct PendingMkt { uint32 asset; uint8 szDec; uint64 at; bool set; }
+    mapping(uint32 => PendingMkt) public pendingMkt;
+    struct PendingGuards { uint256 spreadBps; uint256 devBps; IPriceOracle ref; uint256 refDevBps; uint64 refAge; uint64 at; bool set; }
+    PendingGuards public pendingGuards;
+    event BootstrapFinalized();
+    event MarketProposed(uint32 market, uint32 asset, uint8 szDec, uint64 effectiveAt);
+    event GuardsProposed(uint64 effectiveAt);
+
     event MarketConfigured(uint32 market, uint32 asset, uint8 szDec);
     event GuardsSet(uint256 spreadBps, uint256 devBps, address ref, uint256 refDevBps, uint64 refAge);
 
-    constructor(address owner_, address bbo_, address oraclePx_) Ownable(owner_) {
+    constructor(address owner_, address bbo_, address oraclePx_, uint64 delay_) Ownable(owner_) {
         require(bbo_ != address(0) && oraclePx_ != address(0), "precompile");
+        require(delay_ >= 5 minutes, "delay");
+        delay = delay_;
         bboPrecompile = bbo_;
         oraclePxPrecompile = oraclePx_;
     }
 
+    function finalizeBootstrap() external onlyOwner { bootstrapped = true; emit BootstrapFinalized(); }
+
+    /// @dev instant, bootstrap only
     function configure(uint32 market, uint32 asset, uint8 szDec) external onlyOwner {
+        require(!bootstrapped, "timelocked");
+        _configure(market, asset, szDec);
+    }
+    function _configure(uint32 market, uint32 asset, uint8 szDec) internal {
         require(szDec <= 6, "szDec");
         mkt[market] = Mkt(asset, szDec, true);
         emit MarketConfigured(market, asset, szDec);
     }
+    function proposeMarket(uint32 market, uint32 asset, uint8 szDec) external onlyOwner {
+        require(szDec <= 6, "szDec");
+        uint64 at = uint64(block.timestamp) + delay;
+        pendingMkt[market] = PendingMkt(asset, szDec, at, true);
+        emit MarketProposed(market, asset, szDec, at);
+    }
+    function applyMarket(uint32 market) external onlyOwner {
+        PendingMkt memory p = pendingMkt[market];
+        require(p.set && block.timestamp >= p.at, "delay");
+        delete pendingMkt[market];
+        _configure(market, p.asset, p.szDec);
+    }
+    function cancelMarket(uint32 market) external onlyOwner { delete pendingMkt[market]; }
 
-    /// @dev tighten-only is not enforced; this contract's owner should be the same timelocked multisig as the exchange.
-    function setGuards(uint256 spreadBps, uint256 devBps, IPriceOracle ref, uint256 refDevBps, uint64 refAge) external onlyOwner {
+    function _checkGuards(uint256 spreadBps, uint256 devBps, uint256 refDevBps, uint64 refAge) internal pure {
         require(spreadBps >= 1 && spreadBps <= 200 && devBps >= 10 && devBps <= 500, "bps");
         require(refDevBps >= 10 && refDevBps <= 500 && refAge >= 5 && refAge <= 600, "ref");
+    }
+    function _setGuards(uint256 spreadBps, uint256 devBps, IPriceOracle ref, uint256 refDevBps, uint64 refAge) internal {
+        _checkGuards(spreadBps, devBps, refDevBps, refAge);
         maxSpreadBps = spreadBps; maxDevBps = devBps; refOracle = ref; maxRefDevBps = refDevBps; refMaxAge = refAge;
         emit GuardsSet(spreadBps, devBps, address(ref), refDevBps, refAge);
     }
+    /// @dev instant, bootstrap only
+    function setGuards(uint256 spreadBps, uint256 devBps, IPriceOracle ref, uint256 refDevBps, uint64 refAge) external onlyOwner {
+        require(!bootstrapped, "timelocked");
+        _setGuards(spreadBps, devBps, ref, refDevBps, refAge);
+    }
+    function proposeGuards(uint256 spreadBps, uint256 devBps, IPriceOracle ref, uint256 refDevBps, uint64 refAge) external onlyOwner {
+        _checkGuards(spreadBps, devBps, refDevBps, refAge);
+        uint64 at = uint64(block.timestamp) + delay;
+        pendingGuards = PendingGuards(spreadBps, devBps, ref, refDevBps, refAge, at, true);
+        emit GuardsProposed(at);
+    }
+    function applyGuards() external onlyOwner {
+        PendingGuards memory g = pendingGuards;
+        require(g.set && block.timestamp >= g.at, "delay");
+        delete pendingGuards;
+        _setGuards(g.spreadBps, g.devBps, g.ref, g.refDevBps, g.refAge);
+    }
+    function cancelGuards() external onlyOwner { delete pendingGuards; }
 
     function _read(address pc, uint32 asset) internal view returns (bool ok, bytes memory ret) {
         (ok, ret) = pc.staticcall(abi.encode(uint256(asset)));

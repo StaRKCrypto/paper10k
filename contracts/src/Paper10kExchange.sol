@@ -121,6 +121,7 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         uint64 configDelay_, Params memory p0, Ops memory o0
     ) Ownable(owner_) {
         require(collateralDecimals <= 18 && address(oracle_) != address(0), "init");
+        require(configDelay_ >= 5 minutes, "delay"); // v3: timelock cannot be deployed as a no-op
         collateral = collateral_; px = px_; mintScale = 10 ** (18 - collateralDecimals);
         oracle = oracle_; configDelay = configDelay_;
         _validate(p0, o0);
@@ -165,6 +166,7 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 price = _price(market);
         if (isLong ? price > worstPrice : price < worstPrice) revert Slippage();
         uint256 notional = margin * leverage;
+        if (notional > type(uint128).max) revert Margin(); // v3: no silent uint128 truncation of notional
         if (isLong) { m.oiLong += notional; if (m.oiLong > m.oiCapLong) revert Cap(); }
         else { m.oiShort += notional; if (m.oiShort > m.oiCapShort) revert Cap(); }
 
@@ -401,6 +403,8 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     function pause() external { if (msg.sender != owner() && msg.sender != guardian) revert NotGuardian(); _pause(); }
     function unpause() external onlyOwner { emergencyMode = false; _unpause(); }
     function setEmergencyMode(bool on) external onlyOwner { if (on && !paused()) revert NotEmergency(); emergencyMode = on; emit EmergencyModeSet(on); }
+    /// @dev v3: renouncing would leave a paused exchange with positions that can never close or be rescued.
+    function renounceOwnership() public pure override { revert BadParam(); }
     function setGuardian(address g) external onlyOwner { guardian = g; emit GuardianSet(g); }
     function rescueToken(IERC20 t, address to, uint256 amount) external onlyOwner { require(address(t) != address(collateral), "collateral"); t.safeTransfer(to, amount); }
 }

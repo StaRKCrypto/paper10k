@@ -65,7 +65,7 @@ forge script script/Deploy.s.sol --rpc-url https://rpc.hyperliquid.xyz/evm --led
 ```
 Then, from the multisig, as separate transactions, in this order:
 1. `PAPER10KX.acceptOwnership()`.
-2. `HyperCoreOracle.configure(0, <BTC asset idx>, <BTC szDecimals>)` and `configure(1, <ETH asset idx>, <ETH szDecimals>)` (instant on the oracle, but no market is live yet). Optional: `setGuards(...)`.
+2. `HyperCoreOracle.configure(0, <BTC asset idx>, <BTC szDecimals>)` and `configure(1, <ETH asset idx>, <ETH szDecimals>)` (instant ONLY during the oracle's bootstrap window, no market is live yet). Optional: `setGuards(...)`. Then **`HyperCoreOracle.finalizeBootstrap()` BEFORE `unpause()`** (audit v3 F1): afterwards every oracle change is `propose*` → wait `delay` → `apply*`. Mainnet script also now refuses a deadband below 0.2 bps (`DEADBAND_WAD >= 2e13`).
 3. `Exchange.proposeMarket(0, true, capLong, capShort)`, `proposeMarket(1, ...)` → **wait `configDelay`** → `applyMarket(0)`, `applyMarket(1)`. (Deploy defaults for risk params are the reviewed values in `script/Deploy.s.sol`; to change them: `proposeConfig(params, ops)` → wait → `applyConfig()`.)
 4. `USDC.approve(exchange, seed)`; `Exchange.seedPool(seed)`; `Exchange.fundInsurance(ins)` (suggest ≥ 25 % of pool).
 5. `Exchange.setGuardian(<hot key>)`; verify sources on hyperevmscan.

@@ -96,3 +96,60 @@ LP < $2M, then decaying along an emissions curve. Initially **non-transferable**
 | Token | PAPER, staking, revenue share | **PAPER10KX**: points only, non-transferable, mint on **liquidation only**, hard cap, no staking/revenue |
 | Upgradeability | proxied | **immutable** (no proxy) — fixes by redeploy |
 | Collateral | USDC on HyperCore | ERC-20 USDC on HyperEVM (tUSDC faucet token on testnets) |
+
+---
+
+# Addendum (2026-10-17, second pass) — findings the first pass missed
+
+Method: read-only. Fetched the public landing page and JS bundles of papertrade.xyz (`/assets/main-*.js`, landing only — contains no contract data),
+the docs SPA bundle `docs.papertrade.xyz/assets/index-*.js` (the full docs text is embedded; the first pass had an older/partial reading), and made
+**read-only `eth_getCode` / `eth_call` / `eth_getStorageAt` calls to the public HyperEVM RPC** (`rpc.hyperliquid.xyz/evm`). No transactions, no keys, no wallet.
+`exchange.papertrade.xyz` returned HTTP 404 to an unauthenticated fetch (SPA/geo/route gated) so the app bundle was **not** analysed. No code was copied; this is
+our own summary. Everything below is *docs* (their words) or *on-chain-read* (we called it) as labelled; nothing is audited by us.
+
+## A. Contract addresses (HyperEVM 999, from the docs "Contract addresses" page) — all 10 have code on-chain
+| Contract | Address | On-chain read |
+|---|---|---|
+| Exchange | `0x6cd5661646289FB6E65EA5C032310fDEd797D0a2` | **ERC-1967 proxy** (1852-hex-char runtime), impl slot → `0x0f3febfc94876b0c895f7acecdc8f5c863b549ee`, `owner()` = the Timelock |
+| BatchExecutor | `0x233Ff29b239abc1D7748605dA9b205C3e008626E` | proxy-sized code |
+| PriceOracle | `0xa9B4c7b7Ca5835652d81E25739c870D49F39cC2e` | proxy-sized code |
+| SessionKeyManager | `0x8326Eb8896e358717f10502Ec73CE8D28E37B108` | proxy-sized code |
+| DepositProxyFactory | `0x1629b7D46bef6E13FF754174FC9F32dEa309b38F` | proxy-sized code |
+| PaperToken | `0xe40f17915DAa230324030003A197cdAEf2261C0e` | proxy-sized code |
+| PaperStaking | `0xAAd6c7b0CC3014FC80FfEDAe0Ed7Ce5967b0F016` | proxy-sized code |
+| PaperTokenomics | `0x75174549dbBD44497D31a47E2E2D7406408d63D9` | proxy-sized code |
+| USDC (collateral) | `0xb88339CB7199b77E23DB6E890353E22632Ba630f` ("native Circle USDC on HyperEVM") | — (not independently verified vs Circle's list) |
+| Timelock | `0xB915Fa41e824D6aA31BB833Ee81220C0F2c8EA0F` | contract (6.4 kB code); owner of Exchange |
+| Multisig | `0x696292762fD5AC3677a45EdBe54EAECE4194d1F6` | contract (6.3 kB code), "2-of-3", owns the Timelock |
+Precompiles named in the docs: BBO `0x…080e` (used), Mark `0x…0806`, Oracle `0x…0807` (read "for analytics / forward-compat"), CoreWriter (deposit sweep + `withdrawToCore`).
+**Correction to §7/§11 of the first pass:** the docs now state a **7-day Timelock owned by a 2-of-3 multisig owns the contracts** (we confirmed `Exchange.owner()` == Timelock on-chain; we did *not* verify the 7-day delay or the multisig's signers/threshold — the Timelock's `getMinDelay()` selector reverted, so it is not stock OZ). "The owner can upgrade implementations" is still true, just behind that timelock. Still no published source/audit.
+
+## B. Exchange function surface (decoded from the implementation bytecode with `evmole`, names via a public signature DB; 98 selectors, 52 resolved)
+Resolved: `liquidate(uint256)`, `liquidateBatch(uint256[])`, `close(uint256[])` (batch), `harvest(uint256)`, `pushStakerFees()`, `requestSweep(address)`, `sweep(address)`, `pauseMarket(uint32)`,
+`unpauseMarket(uint32)` (exists in ABI but docs say retired IDs can never be unpaused → expect a revert path), `setTradingPaused(bool)`, `setPauseGuardian/ setAuthorizedExecutor / setAuthorizedKeeper / setProxyFactory / setSessionKeyManager / setPaperTokenomics / changeDevFeeAddress`,
+`setFeeRates(uint256,uint256,uint256)`, `claimDevFees()`, `creditStakingReward(address,uint256)`, views `lpBankrollAvailable() totalQueued() sideBucket() treasury() totalLockedMargin() totalBalances() queueHead() queueNode(uint256) userQueueHead(address) liquidationFeeRate() collateralScale() devFeeAccumulator() stakerFeeAccumulator() positions(uint256) getUserOpenPositionIds(address) nextPositionId() instrumentCount()`, `initialize(address,address,address)`.
+Unresolved selectors with plausible shapes: `openPositionBySig`-style (7-arg incl. `uint256[]`), several `…BySig` withdraw/stake paths, `setInstrument/OI-cap/min-margin` keeper setters (`uint32,bool,uint128,uint32…`), `reconcileSweepCredit`.
+Roles visible as getters: `owner`, `pauseGuardian`, `marketKeeper`, `authorizedExecutor` (BatchExecutor), `authorizedKeeper`, `devFeeRecipient`. Public maintenance paths (docs): liquidate, harvest, requestSweep/finalizeSweep, pushStakerFees, `withdrawToCoreBySig` (any submitter, wallet sig).
+
+## C. Oracle & fee/risk parameters the first pass lacked (*docs*)
+- **BBO read:** `staticcall(abi.encode(asset))` → `(uint64 bid, uint64 ask)`, **price = (bid+ask)/2**; asset index on the 999 deployment **BTC = 0, ETH = 1**. Reverts only if zero or **crossed** book. **No max-deviation, TWAP or lookback breaker** — Papertrade itself documents this as a residual risk ("BBO jitter": resting a non-filling inside quote shifts the mid a tick or two).
+- **Deadband = 0.2 bps** (`entryPrice/50000`): raw profit below it → 0, above it the deadband is *subtracted* before the curve. (Our v2 default was 0.02 bps — 10× weaker; fixed in audit v3.)
+- **Impact curve launch parameters:** `baseRate = 10 %`, `rateMultiplier = 15,000`, `referenceNotional = $100,000`, `positionMultiplier` **814.598 (BTC) / 483.979 (ETH)**; `scale = (1−baseRate)/(1 + 1/(move·rateMult) + refNotional/(1e6·move·posMult))`, `term2` uses a *fixed* reference notional (so haircut % is size-independent — a deliberate change vs Rollbit's model).
+- **Fees:** 2 % win fee (on the gain after the haircut), 2 % LP-side fee on losing closes/liquidations of balance-funded positions only while queue empty & LP can cover it (`liquidationFeeRate = 0.02e18` read on-chain ✔). Half to PAPER stakers, half to dev-fee recipient. **Builder codes**: planned 1 % of the LP-revenue carve to originating frontends, *not live*.
+- **Liquidation buffer ≈ 5 bps fixed in price** (worked example in docs: $99.05 trigger for a 100× $100 long) — at 1000× liquidation fires after ≈0.052 % while a voluntary close would still return ~half the margin.
+- **Retirement mechanics:** `pauseMarket(id)` (pause guardian) freezes the BBO bid/ask at that instant; opens revert `MarketIsPaused`; closes/liquidations use the frozen BBO; **permanent**, relist under a fresh ID. `setTradingPaused(true)` is a reversible global opens gate (guardian engages, **only owner lifts**) and does *not* freeze price.
+- **Market keeper:** moves per-asset, per-side **OI caps** (launch policy: current side OI + **$1B** of BBO-valued headroom, rebuilt only when headroom leaves a ±10 % band, i.e. $900M–$1.1B) and holds min-margin / min-position-value. Cannot touch the curve, collateral or oracle.
+- **Queue internals:** `harvest(maxEntries)` is permissionless (unpaid caller; their keeper calls `harvest(32)`), pays `sideBucket` first; `lpBankrollAvailable()` is 0 whenever anything is queued; **debt-funded (queued-balance) positions**: the claim is the margin, a liquidation destroys it, no fee, still mints PAPER; USD margin returns immediately on a win (only *profit* queues).
+- **Deposits:** only the relayer may deploy a deposit proxy (anti-gas-grief, ≥10 USDC at the address); `requestSweep(user)` snapshots Core balances, `finalizeSweep(user)` credits only if the proxy balance fell, else drops the snapshot and the **owner credits manually via `reconcileSweepCredit`** (manual trust path); raw ERC-20 transfers to the proxy on HyperEVM are *not* monitored (recoverable via `withdrawStuckToken` by the proxy owner). One deposit at a time.
+- **PAPER mint curve:** flat 100 PAPER per $1 of mint basis while `trackedLpUsd < $2M`; above it `100·(S/(S+H))²` with `S = $120M` (`tailDecayScaleUsd`) and **H a one-way high-water mark** (`tailProgressUsd`, never decreases even when stakers drain LP). Mint basis = loss net of LP-side fee. Staking: `stakeBySig` only (direct stake disabled), PAPER auto-approves staking, `distribute()` public path disabled → `distributeBySig` via keeper/relayer. $5M "staker reward cap" on tracked LP; excess pushable by anyone via `pushStakerFees()`.
+- **Data sources/contracts named:** `QueueLib.sol` (`settle`, `applyMarketImpact`) and `Exchange.sol`; whitepaper "Martingaler" by Martin Galer. The docs reference a repo path `contracts/src/…` but we found no public repo.
+
+## D. Live on-chain snapshot (read-only `eth_call`, 2026-10-17 ~16:30 IST; point-in-time, unverified interpretation)
+`instrumentCount = 2`, `tradingPaused = false`, `queueHead = 4` with `totalQueued = 0` and `sideBucket = 0` (queue currently empty), `nextPositionId ≈ 1,152,533`,
+`treasury ≈ $67.8 M`, `totalLockedMargin ≈ $9.47 M` (values 1e18-scaled, `collateralScale = 1e12` for 6-dec USDC). So the "pool starts at $0" story has long since changed: at least ≈$58 M of non-margin treasury (LP + fees + balances) sits in the Exchange. Owner = Timelock confirmed.
+
+## E. What we still could NOT see
+The app bundle (`exchange.papertrade.xyz`, 404 without session/route), unresolved selectors, contract source (unverified on the explorer as far as we could fetch), Timelock delay value on-chain, multisig signer set, relayer/keeper EOAs (getters return addresses; not labelled). Inferences remain inferences.
+
+## F. Tooling vetting note (REA, `rea-agents@6.5.0`)
+Vetted before use: MIT licence; npm `scripts` have **no `preinstall/install/postinstall`** (only `prepare` → husky, which is a no-op for a registry install, and `prepack`); 1,650-file tarball, a prebuilt Windows `.node` (irrelevant on Linux); `install.sh` only runs `curl` to the GitHub releases API and `npm install -g`; `dist` URLs are only GitHub/Hopper/example domains — no telemetry hosts found; it spawns external RE tools (Ghidra, Frida, gdb…) only when asked. We installed it with `--ignore-scripts` in a throwaway dir with an empty env (`env -i`, throwaway `HOME`) and only ran `--help` (Node 20 here vs. its required ≥22.19, so we did **not** run its analysis commands). The site analysis above was done with plain `curl` + our own scripts plus REA's own dependency `evmole` (selector extraction). We did not run `rea setup`/`mcp add` (would write agent configs).

@@ -45,6 +45,7 @@ contract Deploy is Script {
             require(keccak256(bytes(vm.envString("MAINNET_ENABLE"))) == keccak256("I_ACCEPT_REAL_FUNDS_RISK"), "mainnet flag off");
             require(c.owner.code.length > 0, "mainnet owner must be a contract (multisig)");
             require(c.delay >= 1 days, "mainnet config delay >= 1 day");
+            require(c.p.deadbandWad >= 2e13, "mainnet deadband >= 0.2 bps (HL BBO half-spread jitter)"); // v3
             c.collateral = vm.envAddress("COLLATERAL"); // verify the USDC address yourself
             c.useHL = true;
         }
@@ -56,7 +57,7 @@ contract Deploy is Script {
         if (c.testnet) { c.collateral = address(new TestUSDC()); console.log("TestUSDC", c.collateral); }
         address oracle;
         if (c.useHL) {
-            oracle = address(new HyperCoreOracle(c.owner, HL_BBO, HL_ORACLE_PX));
+            oracle = address(new HyperCoreOracle(c.owner, HL_BBO, HL_ORACLE_PX, c.delay));
         } else {
             require(c.signer != address(0), "ORACLE_SIGNER required");
             oracle = address(new SignedPriceOracle(c.owner, c.signer));
@@ -71,6 +72,6 @@ contract Deploy is Script {
         console.log("Oracle", oracle);
         console.log("PAPER10KX", address(px));
         console.log("Exchange", address(ex));
-        console.log("NEXT (owner): oracle.configure, exchange.proposeMarket -> wait delay -> applyMarket, seedPool, fundInsurance, px.acceptOwnership(), unpause()");
+        console.log("NEXT (owner): oracle.configure (bootstrap), oracle.finalizeBootstrap() BEFORE unpause, exchange.proposeMarket -> wait delay -> applyMarket, seedPool, fundInsurance, px.acceptOwnership(), unpause()");
     }
 }
