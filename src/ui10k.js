@@ -12,7 +12,7 @@ const fmt = (p) => p == null ? '—' : p >= 1000 ? p.toLocaleString('en-US', { m
 function setView(v) { body.dataset.view = v; localStorage.setItem('10kx.seen', '1'); window.scrollTo(0, 0); if (v === 'landing') { $('#ascii') && startAscii(); } else stopAscii(); syncNav(); }
 function syncNav() {
   const inChain = body.dataset.mode === 'chain';
-  $$('#navLinks button').forEach((b) => b.classList.toggle('on', b.dataset.go === (inChain ? (window.__p10kStake ? 'stake' : 'chain') : 'trade') && body.dataset.view === 'app'));
+  $$('#navLinks button').forEach((b) => b.classList.toggle('on', b.dataset.go === (inChain ? (window.__p10kStake || 'chain') : 'trade') && body.dataset.view === 'app'));
   const pill = $('#netPill'); if (!pill) return;
   if (inChain) { const t = $('#chainpanel .cbanner'); const main = t?.classList.contains('main'); pill.textContent = main ? 'MAINNET' : 'Testnet'; pill.className = 'pill ' + (main ? 'main' : 'test'); } else { pill.textContent = 'Simulator'; pill.className = 'pill sim'; }
 }
@@ -20,13 +20,13 @@ const chainBtn = (m) => $(`#chainbar button[data-m=${m}]`);
 function go(what) {
   if (what !== 'chain' && body.dataset.mode === 'chain') chainBtn('sim')?.click();
   setView('app');
-  window.__p10kStake = what === 'stake';
-  if (what === 'stake') { chainBtn('chain')?.click(); setView('app'); window.dispatchEvent(new CustomEvent('p10k:tab', { detail: 'stake' })); }
+  window.__p10kStake = ['stake', 'rules'].includes(what) ? what : false;
+  if (window.__p10kStake) { chainBtn('chain')?.click(); setView('app'); window.dispatchEvent(new CustomEvent('p10k:tab', { detail: what })); }
   if (what === 'chain') { chainBtn('chain')?.click(); setView('app'); }
   else if (['pos', 'lp', 'board'].includes(what)) { $(`#tabs button[data-t=${what}]`)?.click(); setTimeout(() => $('#tabs').scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); }
   setTimeout(syncNav, 50);
 }
-$('#navLinks').addEventListener('click', (e) => { const b = e.target.closest('button[data-go]'); if (b) go(b.dataset.go); });
+$('#navLinks').addEventListener('click', (e) => { const b = e.target.closest('button[data-go]'); if (b) { go(b.dataset.go); b.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); } });
 $('#goTrade').onclick = () => go('trade');
 $('#goChain').onclick = () => go('chain');
 $('#btnConnect').onclick = () => { go('chain'); setTimeout(() => $('#chainpanel [data-act=injected]')?.focus(), 400); };
@@ -34,7 +34,7 @@ $('#logo').onclick = (e) => { e.preventDefault(); if (body.dataset.mode === 'cha
 setInterval(syncNav, 700);
 // deep links
 const h = location.hash;
-if (h === '#stake') go('stake'); else if (h === '#onchain') go('chain'); else if (h === '#trade' || localStorage.getItem('10kx.seen') === '1' && h !== '#home') setView('app'); else setView('landing');
+if (h === '#stake') go('stake'); else if (h === '#rules') go('rules'); else if (h === '#onchain') go('chain'); else if (h === '#trade' || localStorage.getItem('10kx.seen') === '1' && h !== '#home') setView('app'); else setView('landing');
 // the on-chain toggle bar lives under the nav
 const moveChain = () => { const c = $('#chainbar'), pn = $('#chainpanel'), slot = $('#chainbarSlot'); if (!c || !pn || !slot) return false; slot.replaceWith(c); c.after(pn); return true; };
 if (!moveChain()) new MutationObserver((_, o) => { if (moveChain()) o.disconnect(); }).observe(body, { childList: true });
