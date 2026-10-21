@@ -4,6 +4,8 @@
 <title>10kx — up to 10000x synthetic perps · simulator + testnet</title>
 <meta name="description" content="10kx: synthetic perpetuals priced from Hyperliquid, up to 10000x leverage. Free simulator and a testnet-only on-chain mode. Nearly all 10000x positions are liquidated within seconds.">
 <meta name="theme-color" content="#07090b">
+<!-- Farcaster mini app embed. PLACEHOLDER (owner): replace YOUR_DOMAIN with the production domain (see .well-known/farcaster.json). -->
+<meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://YOUR_DOMAIN/og.png","button":{"title":"Open PAPER10K","action":{"type":"launch_miniapp","name":"PAPER10K","url":"https://YOUR_DOMAIN/","splashImageUrl":"https://YOUR_DOMAIN/icon.png","splashBackgroundColor":"#07090b"}}}'>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="style.chain.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2307090b'/%3E%3Cpath d='M7 8l9 8-9 8M17 8l8 16M25 8l-8 16' fill='none' stroke='%23d4ff3a' stroke-width='2.6' stroke-linecap='square'/%3E%3C/svg%3E">
@@ -98,6 +100,7 @@
 <div id="toasts"></div>
 <div id="modal" hidden><div class="mbox"><button class="x" id="mClose">×</button><div id="mBody"></div><canvas id="cardCv"></canvas><div class="mbtns"><button id="mDl" class="go long">⬇ Download PnL card</button><button id="mOk" class="ghost">Close</button></div></div></div>
 <script type="module" src="src/app.js"></script>
+<script type="module" src="src/chain/miniapp.js"></script>
 <script type="module" src="src/chain/onchain.js"></script>
 <script type="module" src="src/ui10k.js"></script>
 </body></html>

@@ -1,0 +1,18 @@
+{
+  "_comment": "PLACEHOLDERS (owner): Farcaster mini app manifest. Must be served from https://<YOUR_DOMAIN>/.well-known/farcaster.json at the DOMAIN ROOT (a GitHub Pages project subpath like /paper10k is not enough: use a custom domain or the user-site repo). accountAssociation must be generated and signed for that domain with your Farcaster account (Farcaster developer tools > Manifest).",
+  "accountAssociation": { "header": "PLACEHOLDER", "payload": "PLACEHOLDER", "signature": "PLACEHOLDER" },
+  "miniapp": {
+    "version": "1",
+    "name": "PAPER10K",
+    "homeUrl": "https://YOUR_DOMAIN/",
+    "iconUrl": "https://YOUR_DOMAIN/icon.png",
+    "splashImageUrl": "https://YOUR_DOMAIN/icon.png",
+    "splashBackgroundColor": "#07090b",
+    "subtitle": "10000x paper perps",
+    "description": "Synthetic perps up to 10000x. Nearly all 10000x positions are liquidated within seconds. PAPER10KX and badges have no cash value.",
+    "primaryCategory": "games",
+    "tags": ["perps", "base", "game"],
+    "requiredChains": ["eip155:8453"],
+    "noindex": true
+  }
+}
