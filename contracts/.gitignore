@@ -6,3 +6,4 @@ broadcast/
 echidna-corpus/
 medusa-corpus/
 crytic-export/
+.pyth/

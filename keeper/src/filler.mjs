@@ -3,8 +3,8 @@
 // exchange.fill(rid, updateData). The contract accepts only the UNIQUE first Pyth price published in
 // [ts+1, ts+11] (parsePriceFeedUpdatesUnique), bounded by Chainlink (+ optional 3rd feed).
 // Off-chain venue check is ALERT-ONLY here (see refprice.mjs for why skipping a fill would be wrong).
-// Env: RPC_URL, EXCHANGE, KEEPER_PRIVATE_KEY (optional => dry run), PYTH (default Base 0x8250...), PYTH_API_KEY (Hermes needs a key
-// since 2026-08-26; placeholder), HERMES_URL (default https://hermes.pyth.network), PYTH_IDS (json {"0":"0x..","1":"0x.."}).
+// Env: RPC_URL, EXCHANGE, KEEPER_PRIVATE_KEY (optional => dry run), PYTH (default Base 0x8250...), PYTH_API_KEY (Authorization: Bearer; Hermes needs a key
+// since 2026-08-26; placeholder), HERMES_URL (default https://pyth.dourolabs.app/hermes; auth = Authorization: Bearer, verified live 2026-10-22), PYTH_IDS (json {"0":"0x..","1":"0x.."}).
 import { createPublicClient, createWalletClient, http, parseAbi } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { fetchRefs, judge, MARKET_SYMBOL } from './refprice.mjs';
@@ -22,8 +22,8 @@ const DEFAULT_IDS = { // Pyth Core feed ids (BTC/USD, ETH/USD, SOL/USD)
   2: '0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d',
 };
 
-export async function hermesAt(publishTime, id, { url = 'https://hermes.pyth.network', apiKey, fetchFn = fetch } = {}) {
-  const r = await fetchFn(`${url}/v2/updates/price/${publishTime}?ids[]=${id}&encoding=hex`, { headers: apiKey ? { 'x-api-key': apiKey } : {} });
+export async function hermesAt(publishTime, id, { url = 'https://pyth.dourolabs.app/hermes', apiKey, fetchFn = fetch } = {}) {
+  const r = await fetchFn(`${url}/v2/updates/price/${publishTime}?ids[]=${id}&encoding=hex`, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} });
   if (!r.ok) throw new Error('hermes http ' + r.status);
   const d = await r.json();
   return { data: d.binary.data.map((h) => '0x' + h), price: d.parsed?.[0]?.price };
