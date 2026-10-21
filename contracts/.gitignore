@@ -3,3 +3,6 @@ cache/
 broadcast/
 .env
 *.key
+echidna-corpus/
+medusa-corpus/
+crytic-export/

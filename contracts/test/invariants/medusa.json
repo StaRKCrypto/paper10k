@@ -1,6 +1,6 @@
 {
   "fuzzing": {
-    "workers": 4, "timeout": 600, "testLimit": 0, "callSequenceLength": 60,
+    "workers": 4, "timeout": 540, "testLimit": 0, "callSequenceLength": 60,
     "corpusDirectory": "medusa-corpus",
     "targetContracts": ["P10KEchidna"],
     "blockNumberDelayMax": 2, "blockTimestampDelayMax": 15,

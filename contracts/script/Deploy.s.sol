@@ -5,102 +5,131 @@ import {Script, console} from "forge-std/Script.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Paper10kExchange} from "../src/Paper10kExchange.sol";
 import {Paper10kX} from "../src/Paper10kX.sol";
-import {HyperCoreOracle} from "../src/HyperCoreOracle.sol";
+import {Paper10kStaking} from "../src/Paper10kStaking.sol";
 import {ChainlinkPythOracle} from "../src/ChainlinkPythOracle.sol";
+import {TriggerOrders, IP10KExchange} from "../src/periphery/TriggerOrders.sol";
+import {RektBadges, IRektSource} from "../src/periphery/RektBadges.sol";
 import {TestUSDC} from "../src/testnet/TestUSDC.sol";
 import {SignedPriceOracle} from "../src/testnet/SignedPriceOracle.sol";
 import {IPriceOracle} from "../src/IPriceOracle.sol";
 
-/// @notice Deploy script. A key is supplied ONLY on the command line (--private-key / --account / --ledger); never in files.
-///  Testnets (998 HyperEVM testnet, 84532 Base Sepolia, 31337 local): TestUSDC + (HyperCoreOracle on 998 if USE_HYPERCORE_ORACLE=1, else SignedPriceOracle).
-///  Mainnet (999 HyperEVM): REFUSES unless MAINNET_ENABLE=I_ACCEPT_REAL_FUNDS_RISK, OWNER is a contract (multisig) and COLLATERAL is set.
-///  Mainnet ALWAYS uses HyperCoreOracle (the signed-price oracle lives in src/testnet and is refused here).
-///  Always deploys PAUSED. The owner (multisig) then runs the steps in MAINNET_LAUNCH.md.
+/// @notice ONE-SHOT immutable launch. Key only on the command line (--account / --ledger); never in files.
+///  Economic params: env `P10K_<key>` > JSON file (`PARAMS_JSON`, default /workspace/p10k-backtest/final_params.json, flat
+///  object of the keys below) > testnet placeholder. On MAINNET (8453) every key must come from env or the JSON, else it reverts
+///  "missing param: <key>" — there are no silent defaults for real money.
+///  Flow (single broadcast, nothing can be skipped): oracle (configured, bootstrapped, renounced) -> PAPER10KX -> exchange (paused)
+///  -> staking, TriggerOrders, RektBadges -> markets, limits, staking shares, guardian -> lock minter -> seed pool/insurance
+///  -> unpause + finalize() in consecutive calls -> renounce exchange + PAPER10KX ownership. Asserts the end state.
 contract Deploy is Script {
-    address constant HL_BBO = 0x000000000000000000000000000000000000080e;
-    address constant HL_ORACLE_PX = 0x0000000000000000000000000000000000000807;
-    // Base mainnet (8453) price sources, verified live over RPC on 2026-10-21 (description() + latestRoundData / getPriceUnsafe)
-    address constant BASE_PYTH = 0x8250f4aF4B972684F7b336503E2D6dFeDeB1487a;      // Pyth Core proxy (parsePriceFeedUpdatesUnique)
-    address constant BASE_SEQ = 0xBCF85224fc0756B9Fa45aA7892530B47e10b6433;       // Chainlink L2 sequencer uptime feed
-    address constant CL_BTC = 0x64c911996D3c6aC71f9b455B1E8E7266BcbD848F;         // Chainlink "BTC / USD"
-    address constant CL_ETH = 0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70;         // Chainlink "ETH / USD"
-    address constant CL_SOL = 0x975043adBb80fc32276CbF9Bbcfd4A601a12462D;         // Chainlink "SOL / USD"
+    address constant BASE_PYTH = 0x8250f4aF4B972684F7b336503E2D6dFeDeB1487a;
+    address constant BASE_SEQ = 0xBCF85224fc0756B9Fa45aA7892530B47e10b6433;
+    address constant CL_BTC = 0x64c911996D3c6aC71f9b455B1E8E7266BcbD848F;
+    address constant CL_ETH = 0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70;
+    address constant CL_SOL = 0x975043adBb80fc32276CbF9Bbcfd4A601a12462D;
     bytes32 constant PY_BTC = 0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43;
     bytes32 constant PY_ETH = 0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace;
     bytes32 constant PY_SOL = 0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d;
 
-    struct Cfg { address owner; address signer; uint64 delay; bool testnet; bool useHL; address collateral; Paper10kExchange.Params p; Paper10kExchange.Ops o; }
+    bool mainnet; string json; bool hasJson;
 
-    function _cfg() internal view returns (Cfg memory c) {
-        uint256 id = block.chainid;
-        c.testnet = id == 998 || id == 84532 || id == 31337;
-        require(c.testnet || id == 999 || id == 8453, "unsupported chain");
-        c.owner = vm.envAddress("OWNER");
-        c.signer = vm.envOr("ORACLE_SIGNER", address(0));
-        c.delay = uint64(vm.envOr("CONFIG_DELAY", uint256(c.testnet ? 5 minutes : 2 days)));
-        c.p = Paper10kExchange.Params({
-            maxLeverage: 10_000, maintBps: 1000, winFeeBps: 200, insuranceBps: 1000, maxProfitMult: 100,
-            rateMultiplier: uint32(vm.envOr("RATE_MULTIPLIER", uint256(1000))), mintPerCollateral: 100,
-            deadbandWad: uint64(vm.envOr("DEADBAND_WAD", uint256(2e12))), baseRateWad: 0,
-            minMargin: uint128(vm.envOr("MIN_MARGIN", uint256(1e6))),
-            maxMarginPerPosition: uint128(vm.envOr("MAX_MARGIN", uint256(1e6)) /* launch rule: exactly 1 USDC per position */)
+    /// env > json > placeholder (testnet only)
+    function _u(string memory k, uint256 placeholder) internal view returns (uint256) {
+        string memory ek = string.concat("P10K_", k);
+        if (vm.envExists(ek)) return vm.envUint(ek);
+        if (hasJson && vm.keyExistsJson(json, string.concat(".", k))) return vm.parseJsonUint(json, string.concat(".", k));
+        require(!mainnet, string.concat("missing param: ", k));
+        return placeholder;
+    }
+
+    function _params() internal view returns (Paper10kExchange.Params memory p, Paper10kExchange.Ops memory o, Paper10kExchange.Limits memory l) {
+        // placeholders = the pool-scaled design (maxProfitMult 1, 1% payout cap => maxMargin = pool/100), NOT final numbers
+        p = Paper10kExchange.Params({
+            maxLeverage: uint16(_u("maxLeverage", 10_000)), maintBps: uint16(_u("maintBps", 1000)), winFeeBps: uint16(_u("winFeeBps", 200)),
+            insuranceBps: uint16(_u("insuranceBps", 1000)), maxProfitMult: uint16(_u("maxProfitMult", 1)),
+            rateMultiplier: uint32(_u("rateMultiplier", 1000)), mintPerCollateral: uint32(_u("mintPerCollateral", 100)),
+            deadbandWad: uint64(_u("deadbandWad", 2e13)), baseRateWad: uint64(_u("baseRateWad", 0)),
+            minMargin: uint128(_u("minMargin", 0.01e6)), maxMarginPerPosition: uint128(_u("maxMarginPerPosition", 1_000e6))
         });
-        c.o = Paper10kExchange.Ops({
-            maxTotalDeposits: uint128(vm.envOr("TVL_CAP", c.testnet ? uint256(1_000_000e6) : uint256(5_000e6))),
-            maxPriceAge: 30, minHold: uint64(vm.envOr("MIN_HOLD", uint256(3))),
-            bountyBps: uint16(vm.envOr("BOUNTY_BPS", uint256(200))), bountyCap: uint128(vm.envOr("BOUNTY_CAP", uint256(10e6)))
+        o = Paper10kExchange.Ops({
+            maxTotalDeposits: uint128(_u("maxTotalDeposits", 1_000_000e6)), maxPriceAge: uint64(_u("maxPriceAge", 30)),
+            minHold: uint64(_u("minHold", 3)), bountyBps: uint16(_u("bountyBps", 200)), bountyCap: uint128(_u("bountyCap", 10e6))
         });
-        if (c.testnet) {
-            c.useHL = id == 998 && vm.envOr("USE_HYPERCORE_ORACLE", false);
-        } else {
-            require(keccak256(bytes(vm.envString("MAINNET_ENABLE"))) == keccak256("I_ACCEPT_REAL_FUNDS_RISK"), "mainnet flag off");
-            require(c.owner.code.length > 0, "mainnet owner must be a contract (multisig)");
-            require(c.delay >= 1 days, "mainnet config delay >= 1 day");
-            require(c.p.deadbandWad >= 2e13, "mainnet deadband >= 0.2 bps (HL BBO half-spread jitter)"); // v3
-            c.collateral = vm.envAddress("COLLATERAL"); // verify the USDC address yourself (Base native USDC 0x8335...2913)
-            c.useHL = id == 999;
-        }
+        l = Paper10kExchange.Limits({
+            minNotional: uint128(_u("minNotional", 0)), maxNotional: uint128(_u("maxNotional", 0)), maxWalletMargin: uint128(_u("maxWalletMargin", 0)),
+            maxLiabPoolBps: uint32(_u("maxLiabPoolBps", 10_000)), maxJumpBps: uint16(_u("maxJumpBps", 300)), jumpWindow: uint32(_u("jumpWindow", 60)),
+            maxPayoutPoolBps: uint16(_u("maxPayoutPoolBps", 100)), walletMaxMult: uint16(_u("walletMaxMult", 10)), mintDecayPool: uint64(_u("mintDecayPool", 10_000e6))
+        });
     }
 
     function run() external {
-        Cfg memory c = _cfg();
-        vm.startBroadcast();
-        if (c.testnet) { c.collateral = address(new TestUSDC()); console.log("TestUSDC", c.collateral); }
-        address oracle;
-        if (block.chainid == 8453) {
-            // Pyth = fill price (unique first update after each request) ; Chainlink = sanity bound + 2nd liquidation source ;
-            // optional THIRD_<SYM> AggregatorV3-compatible push feed (RedStone Push / API3 / Chronicle if whitelisted) = 3rd vote.
-            // Deployer configures + finalizes the oracle in the same broadcast, then hands ownership to OWNER (nothing left to change).
-            ChainlinkPythOracle o = new ChainlinkPythOracle(msg.sender, BASE_PYTH, BASE_SEQ, 3600);
-            uint16 dev = uint16(vm.envOr("ORACLE_MAX_DEV_BPS", uint256(100))); uint16 conf = uint16(vm.envOr("ORACLE_MAX_CONF_BPS", uint256(50)));
-            uint32 pyAge = uint32(vm.envOr("PYTH_MAX_AGE", uint256(30)));
-            o.configure(0, CL_BTC, 3900, PY_BTC, pyAge, dev, conf); // CL heartbeats: re-check on data.chain.link before launch
-            o.configure(1, CL_ETH, 3900, PY_ETH, pyAge, dev, conf);
-            o.configure(2, CL_SOL, 86_700, PY_SOL, pyAge, dev, conf);
-            string[3] memory syms = ["BTC", "ETH", "SOL"];
-            for (uint32 i; i < 3; i++) {
-                address t = vm.envOr(string.concat("THIRD_", syms[i]), address(0));
-                if (t != address(0)) o.setThird(i, t, uint32(vm.envOr(string.concat("THIRD_MAX_AGE_", syms[i]), uint256(86_400))));
-            }
-            o.finalizeBootstrap();
-            o.renounceOwnership();
-            oracle = address(o);
-        } else if (c.useHL) {
-            oracle = address(new HyperCoreOracle(c.owner, HL_BBO, HL_ORACLE_PX, c.delay));
-        } else {
-            require(c.signer != address(0), "ORACLE_SIGNER required");
-            oracle = address(new SignedPriceOracle(c.owner, c.signer));
+        uint256 id = block.chainid;
+        bool testnet = id == 84532 || id == 31337;
+        require(testnet || id == 8453, "unsupported chain (Base 8453, Base Sepolia 84532, local 31337)");
+        mainnet = !testnet;
+        string memory path = vm.envOr("PARAMS_JSON", string("/workspace/p10k-backtest/final_params.json"));
+        if (vm.exists(path)) { json = vm.readFile(path); hasJson = true; }
+        if (mainnet) {
+            require(keccak256(bytes(vm.envString("MAINNET_ENABLE"))) == keccak256("I_ACCEPT_REAL_FUNDS_RISK"), "mainnet flag off");
+            require(hasJson || vm.envExists("P10K_maxLeverage"), string.concat("final params missing: ", path));
         }
-        Paper10kX px = new Paper10kX(msg.sender, 1e30);
-        Paper10kExchange ex = new Paper10kExchange(c.owner, IERC20(c.collateral), 6, px, IPriceOracle(oracle), c.delay, c.p, c.o);
-        px.setMinter(address(ex), true);       // lock minter forever
-        px.transferOwnership(c.owner);         // owner must acceptOwnership()
+        (Paper10kExchange.Params memory p, Paper10kExchange.Ops memory o, Paper10kExchange.Limits memory l) = _params();
+        uint256 oiCap = _u("oiCap", 10_000_000e6);
+        uint256 seed = _u("seedPool", testnet ? 100e6 : 0); uint256 seedIns = _u("seedInsurance", 0);
+        uint16 sLoss = uint16(_u("stakerLossBps", 100)); uint16 sFee = uint16(_u("stakerFeeBps", 0));
+        uint256 sCap = _u("stakerCap", 0); uint64 cooldown = uint64(_u("stakeCooldown", 0));
+        uint256 pxMax = _u("pxMaxSupply", 1e30);
+        address guardian = vm.envOr("GUARDIAN", address(0));
+        require(seed > 0, "seedPool must be > 0 (trades cannot open on an empty pool)");
+
+        vm.startBroadcast();
+        address me = msg.sender;
+        address collateral = testnet ? address(new TestUSDC()) : vm.envAddress("COLLATERAL"); // Base native USDC 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+        address oracle = _oracle(testnet, me);
+        Paper10kX px = new Paper10kX(me, pxMax);
+        Paper10kExchange ex = new Paper10kExchange(me, IERC20(collateral), 6, px, IPriceOracle(oracle), 5 minutes, p, o);
+        Paper10kStaking st = new Paper10kStaking(IERC20(address(px)), IERC20(collateral), address(ex), cooldown);
+        TriggerOrders trig = new TriggerOrders(IP10KExchange(address(ex)));
+        RektBadges badges = new RektBadges(IRektSource(address(ex)));
+
+        ex.setMarket(0, true, oiCap, oiCap); ex.setMarket(1, true, oiCap, oiCap); ex.setMarket(2, true, oiCap, oiCap);
+        ex.setLimits(l);
+        ex.setStaking(address(st), sLoss, sFee, sCap);
+        if (guardian != address(0)) ex.setGuardian(guardian);
+        px.setMinter(address(ex), true); // locked forever
+
+        if (testnet) TestUSDC(collateral).mintTo(me, seed + seedIns);
+        IERC20(collateral).approve(address(ex), seed + seedIns);
+        ex.seedPool(seed); if (seedIns > 0) ex.fundInsurance(seedIns);
+
+        // the ONLY place unpause is called: immediately followed by finalize() in the same broadcast
+        ex.unpause();
+        ex.finalize();
+        ex.renounceOwnership();
+        px.renounceOwnership();
         vm.stopBroadcast();
 
-        console.log("chainId", block.chainid);
-        console.log("Oracle", oracle);
-        console.log("PAPER10KX", address(px));
-        console.log("Exchange", address(ex));
-        console.log("NEXT (owner): oracle.configure (bootstrap), oracle.finalizeBootstrap() BEFORE unpause, exchange.setMarket, setLimits, setStaking, seedPool, fundInsurance, unpause() + finalize() + renounceOwnership() (see MAINNET_LAUNCH.md)");
+        require(ex.finalized() && !ex.paused() && ex.owner() == address(0) && px.owner() == address(0) && px.minterLocked() && px.minter() == address(ex), "end state");
+        console.log("chainId", id);
+        console.log("Collateral", collateral); console.log("Oracle", oracle); console.log("PAPER10KX", address(px));
+        console.log("Exchange", address(ex)); console.log("Staking", address(st)); console.log("TriggerOrders", address(trig)); console.log("RektBadges", address(badges));
+        console.log("finalizedBlock", ex.finalizedBlock());
+    }
+
+    function _oracle(bool testnet, address me) internal returns (address) {
+        if (testnet && block.chainid != 8453 && vm.envOr("USE_SIGNED_ORACLE", false)) return address(new SignedPriceOracle(me, vm.envAddress("ORACLE_SIGNER")));
+        // Base mainnet sources (verified live 2026-10-21). On a local chain these addresses are only valid on a Base fork.
+        ChainlinkPythOracle o = new ChainlinkPythOracle(me, vm.envOr("PYTH", BASE_PYTH), vm.envOr("SEQ_FEED", BASE_SEQ), 3600);
+        uint16 dev = uint16(_u("oracleMaxDevBps", 100)); uint16 conf = uint16(_u("oracleMaxConfBps", 50)); uint32 age = uint32(_u("pythMaxAge", 30));
+        o.configure(0, vm.envOr("CL_BTC", CL_BTC), 3900, PY_BTC, age, dev, conf);
+        o.configure(1, vm.envOr("CL_ETH", CL_ETH), 3900, PY_ETH, age, dev, conf);
+        o.configure(2, vm.envOr("CL_SOL", CL_SOL), 86_700, PY_SOL, age, dev, conf);
+        string[3] memory syms = ["BTC", "ETH", "SOL"];
+        for (uint32 i; i < 3; i++) {
+            address t = vm.envOr(string.concat("THIRD_", syms[i]), address(0));
+            if (t != address(0)) o.setThird(i, t, uint32(vm.envOr(string.concat("THIRD_MAX_AGE_", syms[i]), uint256(86_400))));
+        }
+        o.finalizeBootstrap();
+        o.renounceOwnership();
+        return address(o);
     }
 }
