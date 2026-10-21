@@ -1,7 +1,9 @@
-// EIP-1193 wallet layer: injected (EIP-6963 + window.ethereum) and WalletConnect (vendored, lazy). No analytics.
-import { CHAINS, WC_PROJECT_ID, availableChains } from './config.js';
+// EIP-1193 wallet layer: Reown AppKit modal (vendored, lazy: EIP-6963 wallets, WalletConnect v2 QR + mobile deep links,
+// Base Account / Coinbase Smart Wallet passkeys, Safe app), plus the dependency-free injected + WalletConnect fallback.
+// EIP-5792 batched calls with ERC-7677 paymaster sponsorship when the wallet supports it. No analytics.
+import { CHAINS, WC_PROJECT_ID, PAYMASTER_URLS, APP_URL, ENS_RPC, MAINNET_ENABLED, availableChains } from './config.js';
 
-export const state = { provider: null, kind: null, account: null, chainId: null, signedIn: false, name: '' };
+export const state = { provider: null, kind: null, account: null, chainId: null, signedIn: false, name: '', ens: null, caps: null };
 const subs = new Set();
 export const onChange = (f) => subs.add(f);
 const emit = () => subs.forEach((f) => { try { f(state); } catch (e) { console.error(e); } });
@@ -19,9 +21,9 @@ export function injectedProviders() {
 
 const hexToNum = (h) => parseInt(h, 16);
 function attach(p) {
-  p.on?.('accountsChanged', (a) => { state.account = a[0] || null; state.signedIn = false; if (!state.account) disconnect(); else emit(); });
-  p.on?.('chainChanged', (c) => { state.chainId = hexToNum(c); emit(); });
-  p.on?.('disconnect', () => disconnect());
+  p.on?.('accountsChanged', (a) => { if (state.provider !== p) return; state.account = a[0] || null; state.signedIn = false; state.ens = null; if (!state.account) disconnect(); else afterConnect(); });
+  p.on?.('chainChanged', (c) => { if (state.provider !== p) return; state.chainId = typeof c === 'number' ? c : hexToNum(c); emit(); });
+  p.on?.('disconnect', () => { if (state.provider === p) disconnect(); });
 }
 
 export async function connectInjected(entry) {
@@ -29,7 +31,7 @@ export async function connectInjected(entry) {
   const accts = await p.request({ method: 'eth_requestAccounts' });
   state.provider = p; state.kind = 'injected'; state.name = entry.name; state.account = accts[0];
   state.chainId = hexToNum(await p.request({ method: 'eth_chainId' }));
-  state.signedIn = false; attach(p); emit();
+  state.signedIn = false; attach(p); afterConnect();
 }
 
 let wcScript = null;
@@ -53,13 +55,93 @@ export async function connectWalletConnect(onUri, preferChain) {
   p.on('display_uri', onUri);
   await p.connect();
   state.provider = p; state.kind = 'walletconnect'; state.name = 'WalletConnect'; state.account = p.accounts[0]; state.chainId = p.chainId; state.signedIn = false;
-  attach(p); emit();
+  attach(p); afterConnect();
 }
 
-export async function disconnect() {
-  try { if (state.kind === 'walletconnect') await state.provider?.disconnect?.(); } catch { /* ignore */ }
-  Object.assign(state, { provider: null, kind: null, account: null, chainId: null, signedIn: false, name: '' }); emit();
+// ---- Reown AppKit (standard modal). Lazy: 4.7 MB bundle only loads when the user opens it.
+let akScript = null, kit = null, unwatch = null;
+function loadAppKit() {
+  if (window.__P10K_APPKIT) return Promise.resolve(window.__P10K_APPKIT);
+  akScript ??= new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = 'vendor/appkit.bundle.js';
+    s.onload = () => res(window.__P10K_APPKIT); s.onerror = () => { akScript = null; rej(new Error('could not load vendor/appkit.bundle.js')); }; document.head.append(s);
+  });
+  return akScript;
 }
+export const appKitAvailable = () => !!WC_PROJECT_ID;
+export async function openAppKit() {
+  if (!WC_PROJECT_ID) throw new Error('The wallet modal needs a Reown projectId: set WC_PROJECT_ID in src/chain/config.js. Injected wallets below work without it.');
+  const AK = await loadAppKit();
+  if (!kit) {
+    kit = AK.init({ projectId: WC_PROJECT_ID, mainnet: MAINNET_ENABLED, appUrl: APP_URL || location.origin, icon: (APP_URL || location.origin) + '/icon.png' });
+    unwatch = kit.watch(async (a) => {
+      if (a.status === 'connected' && a.address) {
+        const p = await kit.provider(); if (!p) return;
+        if (state.provider !== p) { state.provider = p; attach(p); }
+        Object.assign(state, { kind: 'appkit', name: a.connector?.name || 'Wallet', account: a.address, chainId: a.chainId, signedIn: state.account === a.address && state.signedIn });
+        afterConnect();
+      } else if (a.status === 'disconnected' && state.kind === 'appkit') { reset(); }
+    });
+  }
+  kit.open();
+}
+
+function reset() { Object.assign(state, { provider: null, kind: null, account: null, chainId: null, signedIn: false, name: '', ens: null, caps: null }); emit(); }
+export async function disconnect() {
+  try { if (state.kind === 'walletconnect') await state.provider?.disconnect?.(); if (state.kind === 'appkit') await kit?.disconnect(); } catch { /* ignore */ }
+  reset();
+}
+
+/** after any connection: load EIP-5792 capabilities and ENS/Basename (best effort, never blocks) */
+async function afterConnect() {
+  emit();
+  const acct = state.account;
+  state.caps = null;
+  try { state.caps = await state.provider.request({ method: 'wallet_getCapabilities', params: [acct] }); } catch { /* wallet without EIP-5792 */ }
+  try { const AK = window.__P10K_APPKIT || (state.kind === 'appkit' ? await loadAppKit() : null); if (AK && state.account === acct) state.ens = await AK.lookupName(acct, ENS_RPC); } catch { /* none */ }
+  if (state.account === acct) emit();
+}
+
+const capFor = (chainId) => state.caps?.['0x' + Number(chainId).toString(16)] || state.caps?.[String(chainId)] || null;
+/** true if the connected wallet supports ERC-7677 paymaster sponsorship on this chain AND a paymaster URL is configured */
+export function gaslessReady(chainId = state.chainId) {
+  const c = capFor(chainId); return !!(PAYMASTER_URLS[chainId] && c?.paymasterService?.supported);
+}
+export function batchReady(chainId = state.chainId) {
+  const c = capFor(chainId); return !!(c?.atomic?.status === 'supported' || c?.atomic?.status === 'ready' || c?.atomicBatch?.supported);
+}
+
+/**
+ * Send one or more calls. Uses EIP-5792 wallet_sendCalls (atomic batch, + paymaster when configured & supported),
+ * otherwise sends them one by one with eth_sendTransaction. Resolves to the LAST transaction hash.
+ * @param {{to:string,data:string}[]} calls
+ */
+export async function sendCalls(calls, chainId = state.chainId) {
+  const gasless = gaslessReady(chainId);
+  if (gasless || (calls.length > 1 && batchReady(chainId))) {
+    const params = [{ version: '2.0.0', chainId: '0x' + Number(chainId).toString(16), from: state.account, atomicRequired: true, calls: calls.map((c) => ({ to: c.to, data: c.data, value: '0x0' })),
+      capabilities: gasless ? { paymasterService: { url: PAYMASTER_URLS[chainId] } } : {} }];
+    const r = await state.provider.request({ method: 'wallet_sendCalls', params });
+    const id = typeof r === 'string' ? r : r?.id;
+    for (let i = 0; i < 120; i++) {
+      const st = await state.provider.request({ method: 'wallet_getCallsStatus', params: [id] });
+      const code = typeof st?.status === 'number' ? st.status : st?.status === 'CONFIRMED' ? 200 : st?.status === 'PENDING' ? 100 : 0;
+      if (code >= 200 && code < 300) { const rc = st.receipts?.at(-1); if (rc && rc.status !== '0x1' && rc.status !== 'success') throw new Error('transaction reverted'); return rc?.transactionHash; }
+      if (code >= 400) throw new Error('batch failed (status ' + code + ')');
+      await new Promise((s) => setTimeout(s, 1500));
+    }
+    throw new Error('timed out waiting for the wallet batch');
+  }
+  let h; for (const c of calls) { h = await sendTx(c.to, c.data); if (calls.length > 1) await waitReceipt(chainById(chainId), h); }
+  return h;
+}
+const chainById = (id) => CHAINS[id];
+
+/** WalletConnect mobile deep links for the dependency-free fallback path */
+export const wcDeepLinks = (uri) => {
+  const u = encodeURIComponent(uri);
+  return [['MetaMask', `metamask://wc?uri=${u}`], ['Trust', `trust://wc?uri=${u}`], ['Rainbow', `rainbow://wc?uri=${u}`], ['Coinbase', `cbwallet://wc?uri=${u}`], ['Any wallet', uri]];
+};
 
 export async function switchChain(id) {
   const c = CHAINS[id]; const hex = '0x' + id.toString(16);
@@ -75,7 +157,7 @@ export async function switchChain(id) {
 /** Sign-in with a plain EIP-191 message; verified nowhere (no server) — proves control of the account to this page only. */
 export async function signIn() {
   const nonce = crypto.getRandomValues(new Uint32Array(2)).join('');
-  const msg = `${location.host} wants you to sign in with your wallet.\n\nTESTNET ONLY - no funds, no gas, no transaction.\nAccount: ${state.account}\nChain ID: ${state.chainId}\nNonce: ${nonce}\nIssued At: ${new Date().toISOString()}`;
+  const msg = `${location.host} wants you to sign in with your wallet.\n\nNo funds move, no gas, no transaction.\nAccount: ${state.account}\nChain ID: ${state.chainId}\nNonce: ${nonce}\nIssued At: ${new Date().toISOString()}`;
   await state.provider.request({ method: 'personal_sign', params: [ '0x' + [...new TextEncoder().encode(msg)].map((b) => b.toString(16).padStart(2, '0')).join(''), state.account] });
   state.signedIn = true; emit();
 }
