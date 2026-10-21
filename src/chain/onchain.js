@@ -7,12 +7,13 @@ import { share } from './share.js';
 import { loadSeasons, seasonsHtml } from './seasons.js';
 import { refQuotes, divBps } from './refprice.js';
 import { loadRules, rulesHtml } from './rules.js';
+import { loadStake, stakeHtml, SS } from './stake.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const short = (a) => a ? a.slice(0, 6) + '…' + a.slice(-4) : '';
 const WAD = 10n ** 18n;
-let deployments = {}, mode = 'sim', timer = null, busy = false, wcUri = null, tab = 'trade', seasons = null, rules = null;
+let deployments = {}, mode = 'sim', timer = null, busy = false, wcUri = null, tab = 'trade', seasons = null, rules = null, stakeD = null;
 let DEC = 6; // collateral decimals, read on-chain per deployment (USDC = 6)
 const parseUnits = (v, d = DEC) => pu(v, d), fmtUnits = (b, d = DEC, dp = 2) => fu(b, d, dp);
 const sym = () => (chain()?.testnet ? 'tUSDC' : 'USDC');
@@ -140,8 +141,9 @@ function render() {
   }
   h += `</div>`;
   // --- tabs
-  h += `</div><div class="seg2 ctabs">${[['trade', 'Trade'], ['seasons', '🏆 Seasons'], ['badges', '💀 Badges'], ['rules', '📜 Rules & FAQ']].map(([k, n]) => `<button data-act="tab" data-t="${k}" class="${tab === k ? 'on' : ''}">${n}</button>`).join('')}</div><div class="cgrid">`;
+  h += `</div><div class="seg2 ctabs">${[['trade', 'Trade'], ['stake', '💰 Stake'], ['seasons', '🏆 Seasons'], ['badges', '💀 Badges'], ['rules', '📜 Rules & FAQ']].map(([k, n]) => `<button data-act="tab" data-t="${k}" class="${tab === k ? 'on' : ''}">${n}</button>`).join('')}</div><div class="cgrid">`;
   if (tab === 'seasons') { h += `<div class="ccard wide"><h3>Seasons & competitions</h3>${seasonsHtml(seasons, s.account, DEC)}</div></div>`; return finish(root, h, keep); }
+  if (tab === 'stake') { h += stakeHtml(c && d ? stakeD : null, { sym: sym(), account: s.account, explorer: c?.explorer }) + `</div>`; return finish(root, h, keep); }
   if (tab === 'rules') { h += rulesHtml(c && d ? rules : null, { fmt: (v) => fmtUnits(v), explorer: c?.explorer, sym: sym() }) + `</div>`; return finish(root, h, keep); }
   if (tab === 'badges') { h += badgesHtml(d) + `</div>`; return finish(root, h, keep); }
   // --- balances / pool
@@ -263,11 +265,22 @@ async function txs(label, calls) {
   busy = false; refresh();
 }
 
+function loadStakeNow() { const c = chain(), d = dep(); if (c && d) loadStake(W.rpc, c, d, W.state.account).then((x) => { stakeD = x; render(); }).catch(() => { stakeD = null; render(); }); }
+function setTab(t) { tab = t; if (tab === 'seasons') loadSeasons().then((j) => { seasons = j; render(); }); if (tab === 'stake') loadStakeNow(); if (tab === 'rules') { const c = chain(), d = dep(); if (c && d) loadRules((to, data_) => W.call(c, to, data_), d).then((x) => { rules = x; render(); }).catch(() => { rules = null; render(); }); } render(); }
+window.addEventListener('p10k:tab', (e) => setTab(e.detail));
 async function onClick(e) {
   const b = e.target.closest('button[data-act]'); if (!b) return; const a = b.dataset.act, c = chain(), d = dep();
   try {
     if (a === 'appkit') { await W.openAppKit(); return; }
-    else if (a === 'tab') { tab = b.dataset.t; if (tab === 'seasons') loadSeasons().then((j) => { seasons = j; render(); }); if (tab === 'rules') { const c = chain(), d = dep(); if (c && d) loadRules((to, data_) => W.call(c, to, data_), d).then((x) => { rules = x; render(); }).catch(() => { rules = null; render(); }); } render(); return; }
+    else if (a === 'tab') { setTab(b.dataset.t); return; }
+    else if (a === 'sMax') { $('#sAmt').value = fu(stakeD?.wallet ?? 0n, 18, 6); return; }
+    else if (a === 'sStake' || a === 'sUnstake') { const amt = pu($('#sAmt').value || '0', 18); if (amt <= 0n) return toast('enter an amount', true);
+      if (a === 'sUnstake') { if (amt > (stakeD?.staked ?? 0n)) return toast('more than you have staked', true); return tx('Unstake', stakeD.staking, enc(SS.unstake, amt)).then(loadStakeNow); }
+      if (amt > (stakeD?.wallet ?? 0n)) return toast('more PAPER10KX than in your wallet', true);
+      const calls = []; if ((stakeD.allowance ?? 0n) < amt) calls.push({ to: d.px, data: enc(SS.approve, stakeD.staking, amt) }); calls.push({ to: stakeD.staking, data: enc(SS.stake, amt) });
+      return txs(calls.length > 1 ? 'Approve + stake' : 'Stake', calls).then(loadStakeNow); }
+    else if (a === 'sClaim') return tx('Claim rewards', stakeD.staking, SS.claim).then(loadStakeNow);
+    else if (a === 'sWithdraw') return tx('Withdraw unstaked', stakeD.staking, SS.withdrawUnstaked).then(loadStakeNow);
     else if (a === 'injected') { await W.connectInjected(W.injectedProviders()[+b.dataset.i]); }
     else if (a === 'wc') { wcUri = null; await W.connectWalletConnect((u) => { wcUri = u; render(); }, availableChains()[0].id).then(() => { wcUri = null; }); }
     else if (a === 'disc') { await W.disconnect(); }

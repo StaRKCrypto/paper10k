@@ -119,3 +119,6 @@ select{background:#070c14;color:var(--tx);border:1px solid var(--bd);border-radi
   .rulestbl th{opacity:.7;font-size:.85em;padding:0 0 2px}
   .rulestbl td{padding:0}
 }
+.navstake{font-weight:700}
+.stakegrid{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px}
+@media (max-width:640px){.stakegrid{grid-template-columns:1fr}.stakegrid dd{margin:0 0 6px}}
