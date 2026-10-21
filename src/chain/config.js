@@ -30,7 +30,7 @@ export const CHAINS = {
     explorer: 'https://hyperevmscan.io', faucet: '', testnet: false, mainnet: true },
 };
 
-export const MARKETS = [{ id: 0, sym: 'BTC' }, { id: 1, sym: 'ETH' }];
+export const MARKETS = [{ id: 0, sym: 'BTC' }, { id: 1, sym: 'ETH' }, { id: 2, sym: 'SOL' }];
 
 const dev = () => /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).has('dev');
 

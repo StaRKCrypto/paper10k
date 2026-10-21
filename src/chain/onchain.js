@@ -6,12 +6,13 @@ import { friendly } from './errors.js';
 import { share } from './share.js';
 import { loadSeasons, seasonsHtml } from './seasons.js';
 import { refQuotes, divBps } from './refprice.js';
+import { loadRules, rulesHtml } from './rules.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const short = (a) => a ? a.slice(0, 6) + '…' + a.slice(-4) : '';
 const WAD = 10n ** 18n;
-let deployments = {}, mode = 'sim', timer = null, busy = false, wcUri = null, tab = 'trade', seasons = null;
+let deployments = {}, mode = 'sim', timer = null, busy = false, wcUri = null, tab = 'trade', seasons = null, rules = null;
 let DEC = 6; // collateral decimals, read on-chain per deployment (USDC = 6)
 const parseUnits = (v, d = DEC) => pu(v, d), fmtUnits = (b, d = DEC, dp = 2) => fu(b, d, dp);
 const sym = () => (chain()?.testnet ? 'tUSDC' : 'USDC');
@@ -139,8 +140,9 @@ function render() {
   }
   h += `</div>`;
   // --- tabs
-  h += `</div><div class="seg2 ctabs">${[['trade', 'Trade'], ['seasons', '🏆 Seasons'], ['badges', '💀 Badges']].map(([k, n]) => `<button data-act="tab" data-t="${k}" class="${tab === k ? 'on' : ''}">${n}</button>`).join('')}</div><div class="cgrid">`;
+  h += `</div><div class="seg2 ctabs">${[['trade', 'Trade'], ['seasons', '🏆 Seasons'], ['badges', '💀 Badges'], ['rules', '📜 Rules & FAQ']].map(([k, n]) => `<button data-act="tab" data-t="${k}" class="${tab === k ? 'on' : ''}">${n}</button>`).join('')}</div><div class="cgrid">`;
   if (tab === 'seasons') { h += `<div class="ccard wide"><h3>Seasons & competitions</h3>${seasonsHtml(seasons, s.account, DEC)}</div></div>`; return finish(root, h, keep); }
+  if (tab === 'rules') { h += rulesHtml(c && d ? rules : null, { fmt: (v) => fmtUnits(v), explorer: c?.explorer, sym: sym() }) + `</div>`; return finish(root, h, keep); }
   if (tab === 'badges') { h += badgesHtml(d) + `</div>`; return finish(root, h, keep); }
   // --- balances / pool
   h += `<div class="ccard"><h3>Protocol (${c ? esc(c.short) : '—'})</h3>`;
@@ -265,7 +267,7 @@ async function onClick(e) {
   const b = e.target.closest('button[data-act]'); if (!b) return; const a = b.dataset.act, c = chain(), d = dep();
   try {
     if (a === 'appkit') { await W.openAppKit(); return; }
-    else if (a === 'tab') { tab = b.dataset.t; if (tab === 'seasons') loadSeasons().then((j) => { seasons = j; render(); }); render(); return; }
+    else if (a === 'tab') { tab = b.dataset.t; if (tab === 'seasons') loadSeasons().then((j) => { seasons = j; render(); }); if (tab === 'rules') { const c = chain(), d = dep(); if (c && d) loadRules((to, data_) => W.call(c, to, data_), d).then((x) => { rules = x; render(); }).catch(() => { rules = null; render(); }); } render(); return; }
     else if (a === 'injected') { await W.connectInjected(W.injectedProviders()[+b.dataset.i]); }
     else if (a === 'wc') { wcUri = null; await W.connectWalletConnect((u) => { wcUri = u; render(); }, availableChains()[0].id).then(() => { wcUri = null; }); }
     else if (a === 'disc') { await W.disconnect(); }
