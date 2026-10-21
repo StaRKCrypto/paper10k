@@ -36,28 +36,37 @@ contract Deploy is Script {
     function _u(string memory k, uint256 placeholder) internal view returns (uint256) {
         string memory ek = string.concat("P10K_", k);
         if (vm.envExists(ek)) return vm.envUint(ek);
-        if (hasJson && vm.keyExistsJson(json, string.concat(".", k))) return vm.parseJsonUint(json, string.concat(".", k));
+        if (hasJson) {
+            // flat keys (example file) or the backtest's nested sections (Params / Ops / Limits / Staking)
+            string[5] memory pre = ["", ".Params", ".Ops", ".Limits", ".Staking"];
+            for (uint256 i; i < 5; i++) {
+                string memory jk = string.concat(pre[i], ".", k);
+                if (vm.keyExistsJson(json, jk)) return vm.parseJsonUint(json, jk);
+            }
+            if (keccak256(bytes(k)) == keccak256("seedPool") && vm.keyExistsJson(json, ".Seed.recommended_pool_seed_usd"))
+                return vm.parseJsonUint(json, ".Seed.recommended_pool_seed_usd") * 1e6;
+        }
         require(!mainnet, string.concat("missing param: ", k));
         return placeholder;
     }
 
     function _params() internal view returns (Paper10kExchange.Params memory p, Paper10kExchange.Ops memory o, Paper10kExchange.Limits memory l) {
-        // placeholders = the pool-scaled design (maxProfitMult 1, 1% payout cap => maxMargin = pool/100), NOT final numbers
+        // defaults = the owner-approved final_params.json (backtest): maxProfit 2x, 1% payout cap => maxMargin = 0.5% of pool+insurance
         p = Paper10kExchange.Params({
             maxLeverage: uint16(_u("maxLeverage", 10_000)), maintBps: uint16(_u("maintBps", 1000)), winFeeBps: uint16(_u("winFeeBps", 200)),
-            insuranceBps: uint16(_u("insuranceBps", 1000)), maxProfitMult: uint16(_u("maxProfitMult", 1)),
+            insuranceBps: uint16(_u("insuranceBps", 1000)), maxProfitMult: uint16(_u("maxProfitMult", 2)),
             rateMultiplier: uint32(_u("rateMultiplier", 1000)), mintPerCollateral: uint32(_u("mintPerCollateral", 100)),
-            deadbandWad: uint64(_u("deadbandWad", 2e13)), baseRateWad: uint64(_u("baseRateWad", 0)),
-            minMargin: uint128(_u("minMargin", 0.01e6)), maxMarginPerPosition: uint128(_u("maxMarginPerPosition", 1_000e6))
+            deadbandWad: uint64(_u("deadbandWad", 1e14)), baseRateWad: uint64(_u("baseRateWad", 2e17)),
+            minMargin: uint128(_u("minMargin", 0.001e6)), maxMarginPerPosition: uint128(_u("maxMarginPerPosition", 1_000e6))
         });
         o = Paper10kExchange.Ops({
-            maxTotalDeposits: uint128(_u("maxTotalDeposits", 1_000_000e6)), maxPriceAge: uint64(_u("maxPriceAge", 30)),
-            minHold: uint64(_u("minHold", 3)), bountyBps: uint16(_u("bountyBps", 200)), bountyCap: uint128(_u("bountyCap", 10e6))
+            maxTotalDeposits: uint128(_u("maxTotalDeposits", 1_000_000_000e6)), maxPriceAge: uint64(_u("maxPriceAge", 30)),
+            minHold: uint64(_u("minHold", 30)), bountyBps: uint16(_u("bountyBps", 200)), bountyCap: uint128(_u("bountyCap", 10e6))
         });
         l = Paper10kExchange.Limits({
             minNotional: uint128(_u("minNotional", 0)), maxNotional: uint128(_u("maxNotional", 0)), maxWalletMargin: uint128(_u("maxWalletMargin", 0)),
-            maxLiabPoolBps: uint32(_u("maxLiabPoolBps", 10_000)), maxJumpBps: uint16(_u("maxJumpBps", 300)), jumpWindow: uint32(_u("jumpWindow", 60)),
-            maxPayoutPoolBps: uint16(_u("maxPayoutPoolBps", 100)), walletMaxMult: uint16(_u("walletMaxMult", 10)), mintDecayPool: uint64(_u("mintDecayPool", 10_000e6))
+            maxLiabPoolBps: uint32(_u("maxLiabPoolBps", 5000)), maxJumpBps: uint16(_u("maxJumpBps", 50)), jumpWindow: uint32(_u("jumpWindow", 60)),
+            maxPayoutPoolBps: uint16(_u("maxPayoutPoolBps", 100)), walletMaxMult: uint16(_u("walletMaxMult", 3)), mintDecayPool: uint64(_u("mintDecayPool", 1_000e6))
         });
     }
 
@@ -74,8 +83,8 @@ contract Deploy is Script {
         }
         (Paper10kExchange.Params memory p, Paper10kExchange.Ops memory o, Paper10kExchange.Limits memory l) = _params();
         uint256 oiCap = _u("oiCap", 10_000_000e6);
-        uint256 seed = _u("seedPool", testnet ? 100e6 : 0); uint256 seedIns = _u("seedInsurance", 0);
-        uint16 sLoss = uint16(_u("stakerLossBps", 100)); uint16 sFee = uint16(_u("stakerFeeBps", 0));
+        uint256 seed = _u("seedPool", 20e6); uint256 seedIns = _u("seedInsurance", 0);
+        uint16 sLoss = uint16(_u("stakerLossBps", 500)); uint16 sFee = uint16(_u("stakerFeeBps", 5000));
         uint256 sCap = _u("stakerCap", 0); uint64 cooldown = uint64(_u("stakeCooldown", 0));
         uint256 pxMax = _u("pxMaxSupply", 1e30);
         address guardian = vm.envOr("GUARDIAN", address(0));
