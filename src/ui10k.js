@@ -60,8 +60,8 @@ function updCard() {
   const cv = $('#lcChart'), r = cv.getBoundingClientRect(), d = devicePixelRatio || 1; cv.width = r.width * d; cv.height = r.height * d;
   const x = cv.getContext('2d'); x.scale(d, d); const W = r.width, H = r.height;
   const lo = Math.min(...hist) * 0.99998, hi = Math.max(...hist) * 1.00002, Y = (v) => H - 14 - ((v - lo) / (hi - lo || 1)) * (H - 28);
-  const liq = p * (1 - 0.9 / 10000); x.strokeStyle = '#ff5d73'; x.setLineDash([4, 4]); x.beginPath(); const ly = Math.min(H - 4, Math.max(4, Y(Math.max(liq, lo)))); x.moveTo(0, ly); x.lineTo(W, ly); x.stroke(); x.setLineDash([]);
-  x.strokeStyle = '#d4ff3a'; x.lineWidth = 1.6; x.beginPath(); hist.forEach((v, i) => { const px = (i / Math.max(1, hist.length - 1)) * W; i ? x.lineTo(px, Y(v)) : x.moveTo(px, Y(v)); }); x.stroke();
+  const liq = p * (1 - 0.9 / 10000); x.strokeStyle = '#e5484d'; x.setLineDash([4, 4]); x.beginPath(); const ly = Math.min(H - 4, Math.max(4, Y(Math.max(liq, lo)))); x.moveTo(0, ly); x.lineTo(W, ly); x.stroke(); x.setLineDash([]);
+  x.strokeStyle = '#111111'; x.lineWidth = 1.6; x.beginPath(); hist.forEach((v, i) => { const px = (i / Math.max(1, hist.length - 1)) * W; i ? x.lineTo(px, Y(v)) : x.moveTo(px, Y(v)); }); x.stroke();
 }
 setInterval(updCard, 1000);
 
@@ -89,7 +89,7 @@ function startAscii() {
       const idx = Math.max(0, Math.min(RAMP.length - 1, Math.floor(k * RAMP.length)));
       if (idx < 1) continue;
       const hot = k > 0.8;
-      x.fillStyle = hot ? 'rgba(212,255,58,.85)' : `rgba(150,170,140,${0.1 + k * 0.5})`;
+      x.fillStyle = hot ? 'rgba(255,46,136,.75)' : `rgba(17,17,17,${0.05 + k * 0.22})`;
       x.fillText(RAMP[idx], i * cw, j * ch);
     }
     raf = reduce ? 0 : requestAnimationFrame(frame);

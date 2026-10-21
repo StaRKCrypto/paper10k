@@ -3,11 +3,13 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>10kx — up to 10000x synthetic perps · simulator + testnet</title>
 <meta name="description" content="10kx: synthetic perpetuals priced from Hyperliquid, up to 10000x leverage. Free simulator and a testnet-only on-chain mode. Nearly all 10000x positions are liquidated within seconds.">
-<meta name="theme-color" content="#07090b">
+<meta name="theme-color" content="#fafaf8">
 <!-- Farcaster mini app embed. PLACEHOLDER (owner): replace YOUR_DOMAIN with the production domain (see .well-known/farcaster.json). -->
 <meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://YOUR_DOMAIN/og.png","button":{"title":"Open PAPER10K","action":{"type":"launch_miniapp","name":"PAPER10K","url":"https://YOUR_DOMAIN/","splashImageUrl":"https://YOUR_DOMAIN/icon.png","splashBackgroundColor":"#07090b"}}}'>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="style.chain.css">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="theme-white.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2307090b'/%3E%3Cpath d='M7 8l9 8-9 8M17 8l8 16M25 8l-8 16' fill='none' stroke='%23d4ff3a' stroke-width='2.6' stroke-linecap='square'/%3E%3C/svg%3E">
 </head><body data-view="landing" data-mode="sim">
 <div id="simbar">⚠ PAPER TRADING · SIMULATED FUNDS · NOT FINANCIAL ADVICE — no real money, no wallet, no keys. The house/LP pool and bot traders are simulated too. Nothing here can be withdrawn.</div>
@@ -44,6 +46,7 @@
         <li><b>0.009%</b> and your margin is gone</li>
       </ul>
       <div class="btns"><button class="brk" id="goTrade">[ TRADE ]</button><button class="brk" id="goChain">[ ON-CHAIN TESTNET ]</button><a class="brk" href="https://github.com/StaRKCrypto/paper10k#readme" target="_blank" rel="noopener">[ DOCS ]</a></div>
+      <p><span class="stk pk">degen certified</span> <span class="stk y">10000x</span> <span class="stk g">no funding fees</span></p>
       <p class="warn"><b>Honest odds:</b> nearly all 10000x positions are liquidated within seconds. That is the product. Start with the simulator.</p>
     </div>
     <div class="land-card" aria-label="live preview">
@@ -64,7 +67,7 @@
 <main id="terminal">
   <aside id="markets"><div id="mlist"></div></aside>
   <section id="center">
-    <div class="mhead"><div class="msym"><h2 id="mSym">BTC-PERP</h2><span class="tag">synthetic</span></div><div id="mPrice" class="big">—</div><div id="mChg" class="chg">—</div><div id="mFund" class="muted"></div>
+    <div class="mhead"><div class="msym"><h2 id="mSym">BTC-PERP</h2><span class="tag">synthetic</span></div><div id="mPrice" class="big">—</div><div id="mChg" class="chg">—</div>
       <div class="tfs" id="tfs"><button data-tf="1m" class="on">1m</button><button data-tf="5m">5m</button><button data-tf="15m">15m</button><button data-tf="1h">1h</button></div></div>
     <canvas id="chart"></canvas>
   </section>
@@ -84,7 +87,7 @@
     <dl class="quote">
       <dt>Entry (mid)</dt><dd id="qEntry">—</dd><dt>Notional</dt><dd id="qNot">—</dd><dt>Size</dt><dd id="qSize">—</dd>
       <dt>Liquidation price</dt><dd id="qLiq" class="liq">—</dd><dt>Liq. distance</dt><dd id="qDist">—</dd>
-      <dt>House max size</dt><dd id="qPool">—</dd><dt>Fee (3.5 bps, open)</dt><dd id="qFee">—</dd><dt>Funding (sim, /h)</dt><dd id="qFund">—</dd>
+      <dt>House max size</dt><dd id="qPool">—</dd><dt>Fee (3.5 bps, open)</dt><dd id="qFee">—</dd>
     </dl>
     <button id="submit" class="go long">Buy / Long</button>
     <p class="fine">Nearly all 10000x positions are liquidated within seconds. You trade against a simulated house pool (see House). Paper trading · simulated funds · not financial advice. Isolated margin; liquidation forfeits the margin.</p>
@@ -103,4 +106,6 @@
 <script type="module" src="src/chain/miniapp.js"></script>
 <script type="module" src="src/chain/onchain.js"></script>
 <script type="module" src="src/ui10k.js"></script>
+<script src="src/chars.js"></script>
+<script type="module" src="src/schizo.js"></script>
 </body></html>

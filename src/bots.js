@@ -47,7 +47,7 @@ export class Bots {
     const lev = whale ? 200 + Math.floor(this.rng() * 800) : this.pickLev();
     const med = whale ? 25000 : 600, notional = Math.min(whale ? 40000 : 15000, med * Math.exp((this.rng() - 0.5) * 2.4)); // lognormal-ish around the median
     const margin = Math.max(1, Math.round((notional / lev) * 100) / 100);
-    const r = V.open(ctx, 'bots', { sym, side, margin, lev, price: marks[sym], now, fundingRate: rates?.[sym] }, marks);
+    const r = V.open(ctx, 'bots', { sym, side, margin, lev, price: marks[sym], now, fundingRate: 0 }, marks);
     if (r.position) {
       this.meta[r.position.id] = { until: now + (whale ? 60 : 15) * 1000 + this.rng() * (whale ? 240 : 225) * 1000, whale };
       this.note({ t: now, kind: whale ? 'whale' : 'open', sym, side, lev, notional: margin * lev, pnl: null });

@@ -6,7 +6,7 @@ export const CFG = {
   TAKER_FEE: 0.00035,     // 3.5 bps of notional, charged from free balance on open and close
   MAINT: 0.10,            // maintenance margin = 10% of initial margin
   START_BALANCE: 1000,
-  DEFAULT_FUNDING_HR: 0.0000125, // 0.00125%/h (Hyperliquid baseline) when no live rate known
+  DEFAULT_FUNDING_HR: 0, // no funding: PAPER10K charges no funding fees (matches the contract)
 };
 
 const sgn = (side) => (side === 'long' ? 1 : -1);
@@ -109,7 +109,7 @@ export function tick(state, marks, rates, now, hooks = {}) {
   for (const p of [...state.positions]) {
     const m = marks[p.sym];
     if (!(m > 0)) continue;
-    if (rates && rates[p.sym] != null) p.fundingRate = rates[p.sym];
+    p.fundingRate = 0; // no funding
     accrueFunding(p, m, now);
     p.mark = m;
     if (isLiquidated(p, m)) {
@@ -126,7 +126,7 @@ export function tick(state, marks, rates, now, hooks = {}) {
     const why = hooks.gate ? hooks.gate(o, m) : null; // venue risk gate (caps); rejected orders are refunded
     if (why) { state.balance += o.margin + fee(o.margin * o.lev); emit({ type: 'reject', order: o, reason: why }); continue; }
     // reserved margin+fee already deducted; open directly at limit price
-    const p = openAt(state, { sym: o.sym, side: o.side, margin: o.margin, lev: o.lev, price: o.limitPrice, now, fundingRate: rates?.[o.sym] });
+    const p = openAt(state, { sym: o.sym, side: o.side, margin: o.margin, lev: o.lev, price: o.limitPrice, now, fundingRate: 0 });
     p.mark = m;
     emit({ type: 'fill', position: p });
     if (isLiquidated(p, m)) emit({ type: 'liquidation', rec: closePosition(state, p.id, m, now, 'liquidation') });

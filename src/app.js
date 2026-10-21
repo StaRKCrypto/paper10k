@@ -49,7 +49,7 @@ function showCard(data, title, liq) {
 const closeModal = () => { $('modal').hidden = true; };
 $('mClose').onclick = $('mOk').onclick = closeModal;
 const cardForTrade = (r) => ({ title: r.sym + '-PERP', badge: `${r.side.toUpperCase()} ${r.lev}x`, side: r.side, pnl: r.pnl, pct: r.reason === 'liquidation' ? -100 : (r.pnl / r.margin) * 100, liq: r.reason === 'liquidation', ts: r.closedAt,
-  lines: [`Entry ${px(r.entry)}  →  ${r.reason === 'liquidation' ? 'Liq' : 'Exit'} ${px(r.exit)}`, `Margin ${usd(r.margin)} · Fees ${usd(r.fees)} · Funding ${usd(r.funding)}`] });
+  lines: [`Entry ${px(r.entry)}  →  ${r.reason === 'liquidation' ? 'Liq' : 'Exit'} ${px(r.exit)}`, `Margin ${usd(r.margin)} · Fees ${usd(r.fees)}`] });
 
 // ---------- ticket
 const levFromSlider = (v) => Math.max(1, Math.min(10000, Math.round(10 ** (v / 250))));
@@ -60,14 +60,14 @@ function entryPrice() { return otype === 'limit' ? +$('limitPx').value || null :
 function updateTicket() {
   const L = lev(), m = +$('margin').value || 0, e = entryPrice();
   $('availTxt').textContent = 'avail ' + usd(S.balance);
-  const n = m * L, rate = feed.rates()[sym] ?? E.CFG.DEFAULT_FUNDING_HR;
+  const n = m * L;
   $('qEntry').textContent = e ? px(e) : '—'; $('qNot').textContent = usd(n);
   if (e && m > 0) {
     const size = E.sizeOf(m, L, e), lp = E.liqPrice(side, e, size, m);
     $('qSize').textContent = size.toPrecision(4) + ' ' + sym; $('qLiq').textContent = px(Math.max(0, lp));
     $('qDist').textContent = ((1 - E.CFG.MAINT) / L * 100).toFixed(L >= 100 ? 4 : 2) + '%';
   } else { $('qSize').textContent = $('qLiq').textContent = $('qDist').textContent = '—'; }
-  $('qFee').textContent = usd(E.fee(n), 4); $('qFund').textContent = (rate * 100).toFixed(5) + '% (' + (side === 'long' ? 'long pays' : 'short pays') + (rate >= 0 === (side === 'long') ? '' : ' → receives') + ')';
+  $('qFee').textContent = usd(E.fee(n), 4);
   const r = $('riskNote'); r.className = 'risk';
   const mk = feed.marks(), capErr = e && m > 0 ? P.checkOpen(ctx.pool, V.views(ctx), mk, { sym, side, notional: n, lev: L }) : null;
   const mx = P.maxPositionNotional(Math.max(0, lastMetrics?.nav ?? 0), L, P.POOL_CFG.STRESS_CAP_MULT[lastMetrics?.level ?? 'ok']);
@@ -89,7 +89,7 @@ $('typeSeg').onclick = (e) => { if (!e.target.dataset.o) return; otype = e.targe
 $('submit').onclick = () => {
   const m = +$('margin').value, L = lev(), mark = feed.price(sym);
   if (mark == null) return toast('Feed offline — cannot trade', true);
-  const o = { sym, side, margin: m, lev: L, price: mark, now: Date.now(), fundingRate: feed.rates()[sym] };
+  const o = { sym, side, margin: m, lev: L, price: mark, now: Date.now(), fundingRate: 0 };
   const r = otype === 'market' ? V.open(ctx, 'user', o, feed.marks()) : V.placeLimit(ctx, 'user', { ...o, limitPrice: +$('limitPx').value }, feed.marks());
   if (r.error) return toast(r.error, true);
   toast(r.position ? `Opened ${side} ${sym} ${L}x @ ${px(mark)}` : `Limit ${side} ${sym} ${L}x @ ${px(+$('limitPx').value)} placed`);
@@ -116,13 +116,13 @@ function renderTab() {
   if (tab === 'lp') return renderLP();
   bodyEl.dataset.view = tab;
   if (tab === 'pos') {
-    h = S.positions.length ? `<table><tr><th>Market</th><th>Side</th><th>Lev</th><th>Size</th><th>Entry</th><th>Mark</th><th>Liq. price</th><th>Margin</th><th>Funding</th><th>uPnL (ROE)</th><th></th></tr>` + S.positions.map((p) => {
+    h = S.positions.length ? `<table><tr><th>Market</th><th>Side</th><th>Lev</th><th>Size</th><th>Entry</th><th>Mark</th><th>Liq. price</th><th>Margin</th><th>uPnL (ROE)</th><th></th></tr>` + S.positions.map((p) => {
       const m = marks[p.sym] ?? p.mark, u = E.upnl(p, m);
-      return `<tr><td>${p.sym}</td><td class="${p.side === 'long' ? 'up' : 'dn'}">${p.side}</td><td>${p.lev}x</td><td>${p.size.toPrecision(4)}</td><td>${px(p.entry)}</td><td>${px(m)}</td><td class="dn">${px(E.posLiq(p))}</td><td>${usd(p.margin)}</td><td>${usd(p.funding, 4)}</td><td class="${cls(u)}">${usd(u)} (${(u / p.margin * 100).toFixed(1)}%)</td><td><button data-close="${p.id}">Close</button><button data-sharepos="${p.id}">📸</button></td></tr>`; }).join('') + '</table>' : '<div class="empty">No open positions. Open one from the ticket →</div>';
+      return `<tr><td>${p.sym}</td><td class="${p.side === 'long' ? 'up' : 'dn'}">${p.side}</td><td>${p.lev}x</td><td>${p.size.toPrecision(4)}</td><td>${px(p.entry)}</td><td>${px(m)}</td><td class="dn">${px(E.posLiq(p))}</td><td>${usd(p.margin)}</td><td class="${cls(u)}">${usd(u)} (${(u / p.margin * 100).toFixed(1)}%)</td><td><button data-close="${p.id}">Close</button><button data-sharepos="${p.id}">📸</button></td></tr>`; }).join('') + '</table>' : '<div class="empty">No open positions. Open one from the ticket →</div>';
   } else if (tab === 'ord') {
     h = S.orders.length ? `<table><tr><th>Market</th><th>Side</th><th>Lev</th><th>Margin</th><th>Limit</th><th>Mark</th><th></th></tr>` + S.orders.map((o) => `<tr><td>${o.sym}</td><td class="${o.side === 'long' ? 'up' : 'dn'}">${o.side}</td><td>${o.lev}x</td><td>${usd(o.margin)}</td><td>${px(o.limitPrice)}</td><td>${px(marks[o.sym])}</td><td><button data-cancel="${o.id}">Cancel</button></td></tr>`).join('') + '</table>' : '<div class="empty">No open limit orders.</div>';
   } else if (tab === 'hist') {
-    h = S.history.length ? `<table><tr><th>Closed</th><th>Market</th><th>Side</th><th>Lev</th><th>Entry</th><th>Exit</th><th>Fees</th><th>Funding</th><th>PnL</th><th>Reason</th><th></th></tr>` + S.history.slice(0, 100).map((r) => `<tr><td>${new Date(r.closedAt).toLocaleTimeString()}</td><td>${r.sym}</td><td class="${r.side === 'long' ? 'up' : 'dn'}">${r.side}</td><td>${r.lev}x</td><td>${px(r.entry)}</td><td>${px(r.exit)}</td><td>${usd(r.fees, 3)}</td><td>${usd(r.funding, 4)}</td><td class="${cls(r.pnl)}">${usd(r.pnl)}</td><td>${r.reason === 'liquidation' ? '💀 liquidated' : r.reason === 'adl' ? '⚖ auto-deleveraged' : 'closed'}${r.haircut > 0.005 ? ' · haircut ' + usd(r.haircut) : ''}</td><td><button data-sharehist="${r.id}">📸</button></td></tr>`).join('') + '</table>' : '<div class="empty">No trades yet.</div>';
+    h = S.history.length ? `<table><tr><th>Closed</th><th>Market</th><th>Side</th><th>Lev</th><th>Entry</th><th>Exit</th><th>Fees</th><th>PnL</th><th>Reason</th><th></th></tr>` + S.history.slice(0, 100).map((r) => `<tr><td>${new Date(r.closedAt).toLocaleTimeString()}</td><td>${r.sym}</td><td class="${r.side === 'long' ? 'up' : 'dn'}">${r.side}</td><td>${r.lev}x</td><td>${px(r.entry)}</td><td>${px(r.exit)}</td><td>${usd(r.fees, 3)}</td><td class="${cls(r.pnl)}">${usd(r.pnl)}</td><td>${r.reason === 'liquidation' ? '💀 liquidated' : r.reason === 'adl' ? '⚖ auto-deleveraged' : 'closed'}${r.haircut > 0.005 ? ' · haircut ' + usd(r.haircut) : ''}</td><td><button data-sharehist="${r.id}">📸</button></td></tr>`).join('') + '</table>' : '<div class="empty">No trades yet.</div>';
   } else {
     const eq = fullEquity(), cur = { name, equity: eq, trades: S.history.length, liq: S.liquidations, current: true };
     const rows = [...runs, cur].sort((a, b) => b.equity - a.equity);
@@ -240,7 +240,7 @@ function render() {
   off.style.background = st === 'binance' ? '#8a5a00' : ''; off.textContent = st === 'offline' ? '⛔ FEED OFFLINE — no live price source reachable. Prices are NOT being simulated; trading, liquidation checks and limit fills are paused until the feed returns.' : st === 'binance' ? '⚠ Hyperliquid unreachable — using Binance public prices as fallback.' : '';
   const p = feed.price(sym), c = feed.change24(sym);
   $('mSym').textContent = sym + '-PERP'; $('mPrice').textContent = px(p); const ch = $('mChg'); ch.textContent = c == null ? '24h —' : '24h ' + (c >= 0 ? '+' : '') + c.toFixed(2) + '%'; ch.className = 'chg ' + (c == null ? '' : cls(c));
-  const f = feed.rates()[sym]; $('mFund').textContent = f != null ? `funding ${(f * 100).toFixed(5)}%/h` : '';
+  
   $('nPos').textContent = S.positions.length; $('nOrd').textContent = S.orders.length;
   chart.lines = [...S.positions.filter((x) => x.sym === sym).flatMap((x) => [{ price: x.entry, color: '#5ab8ff', label: `${x.side} ${x.lev}x entry` }, { price: E.posLiq(x), color: '#ff4d6a', label: 'LIQ' }]), ...S.orders.filter((o) => o.sym === sym).map((o) => ({ price: o.limitPrice, color: '#ffb020', label: 'limit' }))];
   renderBanner(); renderMarkets(); renderTab(); updateTicket(); chart.draw();
