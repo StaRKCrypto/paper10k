@@ -38,16 +38,17 @@ test('open/close accounting with fees', () => {
   const r = E.openMarket(s, { sym: 'BTC', side: 'long', margin: 100, lev: 10, price: 100, now: 0 });
   assert.ok(r.position);
   near(s.balance, 1000 - 100 - 1000 * E.CFG.TAKER_FEE);
+  const expWin = E.upnl(r.position, 110);
   const rec = E.closePosition(s, r.position.id, 110, 1);
-  // pnl raw = +100 (10% * 1000), fees = 0.35 + 1100*0.00035
-  near(rec.pnl, 100 - 0.35 - 1100 * E.CFG.TAKER_FEE, 1e-9);
+  // contract settlement: notional*(move-db)*(1-20%)/(1+1/((move-db)*1000)) minus 2% win fee; no trading fees
+  const m = 0.1 - E.CFG.DEADBAND; near(expWin, 1000 * m * 0.8 / (1 + 1 / (m * 1000)) * 0.98, 1e-9); near(rec.pnl, expWin, 1e-9);
   near(s.balance, 1000 + rec.pnl, 1e-9);
 });
 test('short profits when price falls', () => {
   const s = E.newState();
   const r = E.openMarket(s, { sym: 'ETH', side: 'short', margin: 50, lev: 20, price: 2000, now: 0 });
   assert.ok(E.upnl(r.position, 1900) > 0);
-  near(E.upnl(r.position, 1900), 50, 1e-9);
+  const m = 0.05 - E.CFG.DEADBAND; near(E.upnl(r.position, 1900), 1000 * m * 0.8 / (1 + 1 / (m * 1000)) * 0.98, 1e-9);
 });
 test('loss capped at margin; liquidation forfeits margin', () => {
   const s = E.newState();
@@ -70,21 +71,21 @@ test('validation', () => {
   const s = E.newState();
   assert.ok(E.validate(s, { margin: 0.5, lev: 10 }));
   assert.ok(E.validate(s, { margin: 10, lev: 10001 }));
-  assert.ok(E.validate(s, { margin: 1000, lev: 10 })); // fee does not fit
+  assert.ok(E.validate(s, { margin: 1000.01, lev: 10 })); // more than the balance
   assert.equal(E.validate(s, { margin: E.maxMargin(1000, 10), lev: 10 }), null);
   assert.equal(E.validate(s, { margin: 5, lev: 10000 }), null);
 });
 test('limit orders reserve, fill and cancel', () => {
   const s = E.newState();
   const { order } = E.placeLimit(s, { sym: 'BTC', side: 'long', margin: 100, lev: 10, limitPrice: 90, now: 0 });
-  near(s.balance, 1000 - 100 - 0.35);
+  near(s.balance, 1000 - 100);
   assert.equal(E.tick(s, { BTC: 95 }, {}, 1).length, 0);
   const ev = E.tick(s, { BTC: 89 }, {}, 2);
   assert.equal(ev[0].type, 'fill');
   near(s.positions[0].entry, 90);
   const o2 = E.placeLimit(s, { sym: 'BTC', side: 'short', margin: 100, lev: 10, limitPrice: 200, now: 3 }).order;
   assert.ok(E.cancelOrder(s, o2.id));
-  near(s.balance, 1000 - 100 - 0.35 - 0 , 1e-9);
+  near(s.balance, 1000 - 100, 1e-9);
 });
 test('funding: longs pay positive rate, shorts receive', () => {
   const mk = (side) => ({ side, size: 1, lastFundingAt: 0, funding: 0, fundingRate: 0.001 });
@@ -96,4 +97,13 @@ test('total equity conserved on open', () => {
   const s = E.newState();
   E.openMarket(s, { sym: 'BTC', side: 'long', margin: 100, lev: 5, price: 100, now: 0 });
   near(E.totalEquity(s, { BTC: 100 }), 1000 - 500 * E.CFG.TAKER_FEE);
+});
+
+test('contract win formula: deadband, haircut and 2x cap', () => {
+  const p = { side: 'long', entry: 100000, size: 1, margin: 1, lev: 10000 };
+  assert.equal(E.upnl(p, 100000 * (1 + 0.00005)), 0); // inside the 1 bp deadband => no profit
+  const m = 0.0002 - E.CFG.DEADBAND, raw = 10000 * m * 0.8 / (1 + 1 / (m * 1000));
+  near(E.upnl(p, 100000 * 1.0002), Math.min(raw, 2) * 0.98, 1e-9);
+  near(E.upnl(p, 100000 * 1.01), 2 * 0.98, 1e-9); // capped at 2x margin
+  near(E.upnl(p, 100000 * 0.99), -1, 1e-9); // loss capped at margin
 });

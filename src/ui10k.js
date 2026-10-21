@@ -11,13 +11,21 @@ const fmt = (p) => p == null ? '—' : p >= 1000 ? p.toLocaleString('en-US', { m
 // ---------- views
 function setView(v) { body.dataset.view = v; localStorage.setItem('10kx.seen', '1'); window.scrollTo(0, 0); if (v === 'landing') { $('#ascii') && startAscii(); } else stopAscii(); syncNav(); }
 function syncNav() {
+  if (body.dataset.view === 'blog') return;
   const inChain = body.dataset.mode === 'chain';
   $$('#navLinks button').forEach((b) => b.classList.toggle('on', b.dataset.go === (inChain ? (window.__p10kStake || 'chain') : 'trade') && body.dataset.view === 'app'));
   const pill = $('#netPill'); if (!pill) return;
   if (inChain) { const t = $('#chainpanel .cbanner'); const main = t?.classList.contains('main'); pill.textContent = main ? 'MAINNET' : 'Testnet'; pill.className = 'pill ' + (main ? 'main' : 'test'); } else { pill.textContent = 'Simulator'; pill.className = 'pill sim'; }
 }
 const chainBtn = (m) => $(`#chainbar button[data-m=${m}]`);
+async function showBlog() {
+  const el = $('#blog'); if (!el.dataset.ok) { const m = await import('./blog.js'); el.innerHTML = m.blogHtml(); el.dataset.ok = 1;
+    el.addEventListener('click', (e) => { const a = e.target.closest('[data-blog-go]'); if (a) { e.preventDefault(); go(a.dataset.blogGo); } const t = e.target.closest('.btoc a'); if (t) { e.preventDefault(); $(t.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth' }); } }); }
+  body.dataset.view = 'blog'; stopAscii(); window.scrollTo(0, 0); history.replaceState(null, '', '#blog');
+  $$('#navLinks button').forEach((b) => b.classList.toggle('on', b.dataset.go === 'blog'));
+}
 function go(what) {
+  if (what === 'blog') { if (body.dataset.mode === 'chain') chainBtn('sim')?.click(); return showBlog(); }
   if (what !== 'chain' && body.dataset.mode === 'chain') chainBtn('sim')?.click();
   setView('app');
   window.__p10kStake = ['stake', 'rules'].includes(what) ? what : false;
@@ -34,7 +42,7 @@ $('#logo').onclick = (e) => { e.preventDefault(); if (body.dataset.mode === 'cha
 setInterval(syncNav, 700);
 // deep links
 const h = location.hash;
-if (h === '#stake') go('stake'); else if (h === '#rules') go('rules'); else if (h === '#onchain') go('chain'); else if (h === '#trade' || localStorage.getItem('10kx.seen') === '1' && h !== '#home') setView('app'); else setView('landing');
+if (h === '#blog') go('blog'); else if (h === '#stake') go('stake'); else if (h === '#rules') go('rules'); else if (h === '#onchain') go('chain'); else if (h === '#trade' || localStorage.getItem('10kx.seen') === '1' && h !== '#home') setView('app'); else setView('landing');
 // the on-chain toggle bar lives under the nav
 const moveChain = () => { const c = $('#chainbar'), pn = $('#chainpanel'), slot = $('#chainbarSlot'); if (!c || !pn || !slot) return false; slot.replaceWith(c); c.after(pn); return true; };
 if (!moveChain()) new MutationObserver((_, o) => { if (moveChain()) o.disconnect(); }).observe(body, { childList: true });

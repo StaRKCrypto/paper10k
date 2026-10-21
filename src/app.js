@@ -67,7 +67,7 @@ function updateTicket() {
     $('qSize').textContent = size.toPrecision(4) + ' ' + sym; $('qLiq').textContent = px(Math.max(0, lp));
     $('qDist').textContent = ((1 - E.CFG.MAINT) / L * 100).toFixed(L >= 100 ? 4 : 2) + '%';
   } else { $('qSize').textContent = $('qLiq').textContent = $('qDist').textContent = '—'; }
-  $('qFee').textContent = usd(E.fee(n), 4);
+  $('qFee').textContent = usd(m * E.CFG.MAX_PROFIT_MULT * (1 - E.CFG.WIN_FEE));
   const r = $('riskNote'); r.className = 'risk';
   const mk = feed.marks(), capErr = e && m > 0 ? P.checkOpen(ctx.pool, V.views(ctx), mk, { sym, side, notional: n, lev: L }) : null;
   const mx = P.maxPositionNotional(Math.max(0, lastMetrics?.nav ?? 0), L, P.POOL_CFG.STRESS_CAP_MULT[lastMetrics?.level ?? 'ok']);

@@ -3,7 +3,9 @@ export const CFG = {
   MAX_LEV: 10000,
   MIN_LEV: 1,
   MIN_MARGIN: 1,          // USD
-  TAKER_FEE: 0.00035,     // 3.5 bps of notional, charged from free balance on open and close
+  TAKER_FEE: 0,           // no open/close fee (matches the contract); the house earns via the win haircut below
+  // win formula = the contract's (final_params.json): profit = notional*(move-db)*(1-base)/(1+1/((move-db)*rM)), capped at M x margin, minus winFee
+  DEADBAND: 0.0001, BASE_RATE: 0.2, RATE_MULT: 1000, MAX_PROFIT_MULT: 2, WIN_FEE: 0.02,
   MAINT: 0.10,            // maintenance margin = 10% of initial margin
   START_BALANCE: 1000,
   DEFAULT_FUNDING_HR: 0, // no funding: PAPER10K charges no funding fees (matches the contract)
@@ -25,7 +27,15 @@ export function liqPrice(side, entry, size, margin, funding = 0) {
   return side === 'long' ? entry - buffer : entry + buffer;
 }
 export function liqDistancePct(side, entry, lev) { return ((1 - CFG.MAINT) / lev) * 100; }
-export function upnl(p, mark) { return sgn(p.side) * (mark - p.entry) * p.size; }
+export function rawPnl(p, mark) { return sgn(p.side) * (mark - p.entry) * p.size; }
+/** PnL exactly as the contract settles it: losses linear (capped at margin), wins through deadband + haircut + 2x cap + win fee. */
+export function upnl(p, mark) {
+  const n = p.margin * p.lev, move = sgn(p.side) * (mark - p.entry) / p.entry;
+  if (move <= 0) return Math.max(-p.margin, n * move);
+  const m = move - CFG.DEADBAND; if (m <= 0) return 0;
+  const profit = Math.min((n * m * (1 - CFG.BASE_RATE)) / (1 + 1 / (m * CFG.RATE_MULT)), p.margin * CFG.MAX_PROFIT_MULT);
+  return profit * (1 - CFG.WIN_FEE);
+}
 export function equityOf(p, mark) { return p.margin + upnl(p, mark) - p.funding; }
 export function posLiq(p) { return liqPrice(p.side, p.entry, p.size, p.margin, p.funding); }
 export function isLiquidated(p, mark) { return equityOf(p, mark) <= p.margin * CFG.MAINT; }

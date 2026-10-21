@@ -16,14 +16,14 @@ test('conservation: open -> win -> close', () => {
   conserved(c);
   const r = V.open(c, 'user', O({ margin: 100, lev: 10 }), M);
   assert.ok(r.position); conserved(c);
-  near(c.pool.collateral, 100); near(c.pool.assets, 1_000_000 + 0.35);
+  near(c.pool.collateral, 100); near(c.pool.assets, 1_000_000);
+  const win = E.upnl(r.position, 110);
   const rec = V.close(c, 'user', r.position.id, 110, 1, 'close', { BTC: 110 });
   conserved(c);
-  near(rec.pnl, 100 - 0.35 - 1100 * E.CFG.TAKER_FEE, 1e-9);
+  near(rec.pnl, win, 1e-9);
   near(c.accts.user.balance, 1000 + rec.pnl, 1e-9);
   near(c.pool.collateral, 0);
-  // pool = seed + fees - trader raw win
-  near(c.pool.assets, 1_000_000 + 0.35 + 1100 * E.CFG.TAKER_FEE - 100, 1e-9);
+  near(c.pool.assets, 1_000_000 - win, 1e-9); // pool = seed - trader win (no trading fees)
 });
 test('losses and fees flow to the pool; liquidation forfeits margin to the pool', () => {
   const c = mk();
@@ -37,9 +37,10 @@ test('losses and fees flow to the pool; liquidation forfeits margin to the pool'
 test('pool pays trader wins (pool assets fall by the win)', () => {
   const c = mk(), r = V.open(c, 'user', O({ margin: 50, lev: 100 }), { BTC: 100 });
   const a0 = c.pool.assets;
-  V.close(c, 'user', r.position.id, 101, 1, 'close', { BTC: 101 }); // +1% * 5000 = +50
+  const win = E.upnl(r.position, 101);
+  V.close(c, 'user', r.position.id, 101, 1, 'close', { BTC: 101 }); // +1% at 100x, contract formula
   conserved(c);
-  near(c.pool.trading, -50, 1e-9);
+  assert.ok(win > 0); near(c.pool.trading, -win, 1e-9);
   assert.ok(c.pool.assets < a0 + 5000 * 2 * E.CFG.TAKER_FEE + 1e-9 && c.pool.assets > a0 - 50);
 });
 test('limit order fill, cancel and caps rejection conserve funds', () => {
@@ -105,17 +106,17 @@ test('share math: withdraw all returns exactly deposited value at constant NAV; 
 });
 test('NAV marks open trader PnL to market: unrealised trader win lowers share price; loss is capped at margin', () => {
   const p = P.newPool(1000), pos = { sym: 'BTC', side: 'long', size: 1, entry: 100, margin: 10, funding: 0, mark: 100, lev: 10 };
-  near(P.nav(p, [pos], { BTC: 105 }), 1000 - 5);
+  const w = E.upnl(pos, 105); assert.ok(w > 0); near(P.nav(p, [pos], { BTC: 105 }), 1000 - w);
   near(P.nav(p, [pos], { BTC: 50 }), 1000 + 10); // -50 pnl floored at -margin
-  near(P.sharePrice(p, [pos], { BTC: 105 }), 0.995);
+  near(P.sharePrice(p, [pos], { BTC: 105 }), (1000 - w) / 1000);
 });
 test('late LP cannot steal unrealised gains: deposit while a trader is winning mints more shares', () => {
   const p = P.newPool(1000), pos = { sym: 'BTC', side: 'long', size: 1, entry: 100, margin: 10, funding: 0, mark: 100, lev: 10 };
-  const M = { BTC: 110 }; // trader up $10 unrealised
-  const sp = P.sharePrice(p, [pos], M); near(sp, 0.99);
-  const d = P.deposit(p, 'user', 99, [pos], M); near(d.price, 0.99); near(d.shares, 100);
+  const M = { BTC: 110 }; const w = E.upnl(pos, 110); // trader up unrealised (contract formula)
+  const sp = P.sharePrice(p, [pos], M); near(sp, (1000 - w) / 1000);
+  const d = P.deposit(p, 'user', 99, [pos], M); near(d.price, sp); near(d.shares, 99 / sp);
   P.sample(p, [pos], { BTC: 100 }, 0, true);
-  near(P.sharePrice(p, [pos], { BTC: 100 }), 1099 / 1100, 1e-9); // trader gave the gain back: pool 1099 over 1100 shares
+  near(P.sharePrice(p, [pos], { BTC: 100 }), 1099 / (1000 + 99 / sp), 1e-9); // trader gave the gain back
 });
 
 test('deposit/withdraw errors and balance checks', () => {
