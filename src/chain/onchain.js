@@ -5,6 +5,7 @@ import { SEL, TOPIC_OPENED, TOPIC_CLOSED, TOPIC_LIQUIDATED, enc, words, toBig, t
 import { friendly } from './errors.js';
 import { share } from './share.js';
 import { loadSeasons, seasonsHtml } from './seasons.js';
+import { refQuotes, divBps } from './refprice.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -68,9 +69,11 @@ async function refresh() {
       try { DEC = Number(toBig((await r(d.collateral, SEL.decimals)).slice(2))); } catch { DEC = 6; }
       let lim = null; try { const lw = words(await r(d.exchange, SEL.limits)); lim = { minNotional: toBig(lw[0]), maxNotional: toBig(lw[1]), maxWallet: toBig(lw[2]), liabBps: Number(toBig(lw[3])), jumpBps: Number(toBig(lw[4])) }; } catch { /* pre-limits build */ }
       data = { paused: toBig(paused.slice(2)) === 1n, pool: toBig(pool.slice(2)), totalMargin: toBig(tm.slice(2)), totalFree: toBig(tf.slice(2)),
-        maxLev: Number(toBig(maxLev.slice(2))), minM: toBig(minM.slice(2)), maxM: toBig(maxM.slice(2)), queued: toBig(qt.slice(2)), insurance: toBig(ins.slice(2)), prices: {}, positions: [], lim, mkts: {}, results: [] };
+        maxLev: Number(toBig(maxLev.slice(2))), minM: toBig(minM.slice(2)), maxM: toBig(maxM.slice(2)), queued: toBig(qt.slice(2)), insurance: toBig(ins.slice(2)), prices: {}, refs: {}, positions: [], lim, mkts: {}, results: [] };
+      try { data.finalized = toBig((await r(d.exchange, SEL.finalized)).slice(2)) === 1n; } catch { data.finalized = false; }
       for (const m of MARKETS) {
         try { const [p, ts] = words(await r(d.oracle, SEL.getPrice, m.id)); data.prices[m.id] = { price: toBig(p), ts: Number(toBig(ts)) }; } catch { data.prices[m.id] = { price: 0n, ts: 0 }; }
+        try { data.refs[m.id] = await refQuotes(m.sym); } catch { data.refs[m.id] = null; }
         try { const mw = words(await r(d.exchange, SEL.markets, m.id)); data.mkts[m.id] = { listed: toBig(mw[0]) === 1n, open: toBig(mw[1]) === 1n, capL: toBig(mw[2]), capS: toBig(mw[3]), oiL: toBig(mw[4]), oiS: toBig(mw[5]) }; } catch { data.mkts[m.id] = null; }
       }
       if (acct) {
@@ -203,8 +206,11 @@ function openBlocker() {
   if (data.paused) return 'Exchange is paused: new positions are disabled. You can still withdraw your free balance.';
   const mk = +($('#cMkt')?.value ?? 0), k = data.mkts[mk];
   if (k && !k.open) return 'This market is closed to new positions.';
-  const pr = data.prices[mk];
-  if (!pr?.price) return 'Oracle price unavailable or stale: trading is halted until the feed is fresh.';
+  const pr = data.prices[mk], ref = data.refs?.[mk];
+  // after finalize fills use a fresh Pyth update fetched by the filler, so a stale STORED price does not block; the venue median must exist
+  if (data.finalized ? !(ref?.median > 0) && !pr?.price : !pr?.price) return 'No usable price right now (oracle and reference venues unavailable).';
+  const dv = pr?.price && ref?.median ? divBps(fmtPx(pr.price), ref.median) : NaN;
+  if (!data.finalized && dv > 50) return `On-chain oracle is ${dv.toFixed(0)} bps away from the Binance/Coinbase/Hyperliquid/Lighter median: opening is blocked in the app until they agree.`;
   return null;
 }
 /** client-side pre-flight of the on-chain risk limits so users see why before signing */
@@ -229,13 +235,18 @@ function badgesHtml(d) {
   return h + `<p class="fine">Anyone can mint a badge to your address once the exchange's on-chain rekt counter reaches the tier. Not transferable.</p></div>`;
 }
 
+function refLine(mk, pr) {
+  const r = data.refs?.[mk]; if (!r || !(r.median > 0)) return ' · <span class="muted">reference venues unavailable</span>';
+  const f = (x) => (Number.isFinite(x) && x > 0 ? usd(x) : '—'), dv = pr ? divBps(fmtPx(pr), r.median) : NaN;
+  return `<br><span class="fine">Venues (display only): Binance ${f(r.binance)} · Coinbase ${f(r.coinbase)} · Hyperliquid ${f(r.hyperliquid)} · Lighter ${f(r.lighter)} · median <b>${f(r.median)}</b>${Number.isFinite(dv) ? ` · oracle vs median <b class="${dv > 50 ? 'dn' : 'up'}">${dv.toFixed(1)} bps</b>${dv > 50 ? ' ⚠ diverged' : ''}` : ''}</span>`;
+}
 function quote() {
   const el = $('#cQuote'); if (!el || !data) return;
   const lev = +$('#cLev').value || 1, m = +$('#cMargin').value || 0, mk = +$('#cMkt').value, side = $('#cSideV').value;
   $('#cLevT').textContent = lev + 'x';
   const pr = data.prices[mk]?.price ?? 0n, age = pr ? Math.floor(Date.now() / 1000) - data.prices[mk].ts : null;
   const dist = (0.9 / lev * 100);
-  el.innerHTML = `Notional <b>${usd(m * lev)}</b> · liquidated by a <b class="dn">${dist < 0.1 ? dist.toFixed(4) : dist.toFixed(2)}%</b> adverse move · oracle price ${pr ? usd(fmtPx(pr)) + ` (${age}s old)` : '<span class="dn">none (relayer offline)</span>'}${lev >= 1000 ? `<br><b class="dn">⚠ ${lev}x: you will almost certainly lose this margin.</b>` : ''}`;
+  el.innerHTML = `Notional <b>${usd(m * lev)}</b> · liquidated by a <b class="dn">${dist < 0.1 ? dist.toFixed(4) : dist.toFixed(2)}%</b> adverse move · oracle price ${pr ? usd(fmtPx(pr)) + ` (${age}s old)` : '<span class="muted">no fresh stored price</span>'}${refLine(mk, pr)}${lev >= 1000 ? `<br><b class="dn">⚠ ${lev}x: you will almost certainly lose this margin.</b>` : ''}`;
 }
 
 async function tx(label, to, data_) { return txs(label, [{ to, data: data_ }]); }
@@ -277,13 +288,18 @@ async function onClick(e) {
       const mk = +$('#cMkt').value, isLong = $('#cSideV').value === 'long', margin = parseUnits($('#cMargin').value), lev = Math.round(+$('#cLev').value);
       const pr = data?.prices[mk]?.price; const blk = openBlocker(); if (blk) return toast(blk, true);
       const pf = preflight(margin, lev); if (pf) return toast(pf, true);
-      const worst = isLong ? pr * 10005n / 10000n : pr * 9995n / 10000n; // 5 bps slippage guard
+      // slippage anchor: the venue median when available (the stored on-chain price may be stale; fills use a fresh one)
+      const ref = data.refs?.[mk]?.median, anchor = ref > 0 ? pu(ref.toFixed(8), 18) : pr;
+      if (!anchor) return toast('No price to anchor the slippage guard.', true);
+      const worst = isLong ? anchor * 10010n / 10000n : anchor * 9990n / 10000n; // 10 bps slippage guard (a miss refunds the margin)
+      if (data.finalized) { const ok = await tx('Open request', d.exchange, enc(SEL.requestOpen, mk, isLong, margin, lev, worst)); toast('Order placed: a keeper fills it at the first Pyth price published after your request (~1–3 s). If the price moved past your guard, the margin is refunded.'); return ok; }
       return tx('Open', d.exchange, enc(SEL.open, mk, isLong, margin, lev, worst));
     }
     else if (a === 'close') {
       const p = data.positions.find((x) => String(x.id) === b.dataset.id), pr = data.prices[p.market].price;
       // v4: liquidation is a permissionless 2-step (markLiquidatable, >=2 blocks, liquidate) priced by a multi-source oracle. The owner's own
       // close() is always available and the contract decides: hard-bust if the multi-source price agrees, else the (capped) realised loss.
+      if (data.finalized) { const ok = await tx('Close request', d.exchange, enc(SEL.requestClose, p.id)); toast('Close requested: filled at the first Pyth price after your request. It cannot be cancelled.'); return ok; }
       return tx('Close', d.exchange, enc(SEL.close, p.id));
     }
     else if (a === 'tpsl') {
