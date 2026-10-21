@@ -92,3 +92,10 @@ Audits closed ✅ · legal opinion ✅ · oracle verified on fork ✅ · monitor
 
 ## v6 note — deploy gas vs HyperEVM block limit (found in TESTNET_RUN.md)
 Paper10kExchange creation costs ~4.62M gas; HyperEVM small blocks are capped at 3,000,000. The deployer address must enable **big blocks** (30M limit) via the HyperCore `usingBigBlocks` user action before deploying (or the Exchange must be shrunk), then switch back. Rehearse this on testnet 998 with a funded throwaway key before any mainnet step. Also measure mainnet BTC/ETH mid-vs-oraclePx divergence: with both-agree liquidation, divergence delays liquidations at 10000x.
+
+## v7 — launch risk limits (Base target, branch oracle-l2-adapters)
+Before the first `unpause()`, the owner calls `setLimitsPreLaunch((minNotional, maxNotional, maxWalletMargin, maxLiabPoolBps, maxJumpBps, jumpWindow))`;
+after the first unpause it is `proposeLimits` → wait `configDelay` → `applyLimits`. Conservative launch defaults (6-dec USDC):
+`(10_000e6, 1_000_000e6, 100e6, 10_000, 50, 60)` = $10k min notional (Papertrade's value), $1M max notional (Papertrade: $10M),
+$100 total open margin per wallet, per-side worst-case liability ≤ 100 % of pool+insurance, opens blocked while price is >0.5 % from a
+reference re-anchored at most every 60 s. Closes and liquidations are never blocked by these limits.

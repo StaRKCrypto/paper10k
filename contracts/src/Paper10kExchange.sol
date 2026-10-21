@@ -62,6 +62,20 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     uint64 public pendingOracleAt;
 
     address public guardian;
+
+    /// @notice launch risk limits (Papertrade-style). 0 = disabled. Instant only before the first unpause(), then timelocked (configDelay).
+    ///   minNotional/maxNotional: per-position notional bounds (collateral units; Papertrade: $10k min, $10M max per position).
+    ///   maxWalletMargin: total open margin per wallet. maxLiabPoolBps: per market+side, worst-case reserved liability
+    ///   (margin x maxProfitMult) <= (pool+insurance) x bps (LP utilisation cap). maxJumpBps: oracle circuit breaker, opens revert
+    ///   while the price is more than maxJumpBps from the reference price, which re-anchors at most every jumpWindow seconds.
+    struct Limits { uint128 minNotional; uint128 maxNotional; uint128 maxWalletMargin; uint32 maxLiabPoolBps; uint16 maxJumpBps; uint32 jumpWindow; }
+    Limits public limits;
+    struct PendingLimits { Limits l; uint64 at; bool set; }
+    PendingLimits public pendingLimits;
+    bool public launched;
+    mapping(address => uint256) public walletMargin;
+    mapping(uint32 => uint256) public refPx;
+    mapping(uint32 => uint64) public refAt;
     bool public emergencyMode;
 
     struct Market { bool listed; bool open; uint256 oiCapLong; uint256 oiCapShort; uint256 oiLong; uint256 oiShort; }
@@ -128,9 +142,10 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     event EmergencyModeSet(bool on);
     event GuardianSet(address g);
 
+    event LimitsSet(); event LimitsProposed(uint64 at);
     error BadParam(); error NotListed(); error MarketClosed(); error Leverage(); error Margin(); error Cap();
     error PriceBad(); error Slippage(); error NotOwnerOfPosition(); error TooSoon(); error NotLiquidatable();
-    error MarkNotReady(); error StillBusted(); error Reserved(); error InsufficientFree(); error TransferMismatch(); error NotEmergency(); error NotGuardian(); error Delay(); error NothingPending();
+    error MarkNotReady(); error StillBusted(); error Reserved(); error InsufficientFree(); error TransferMismatch(); error NotEmergency(); error NotGuardian(); error Delay(); error NothingPending(); error Breaker();
 
     constructor(
         address owner_, IERC20 collateral_, uint8 collateralDecimals, Paper10kX px_, IPriceOracle oracle_,
@@ -185,6 +200,7 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         if (notional > type(uint128).max) revert Margin(); // v3: no silent uint128 truncation of notional
         if (isLong) { m.oiLong += notional; if (m.oiLong > m.oiCapLong) revert Cap(); }
         else { m.oiShort += notional; if (m.oiShort > m.oiCapShort) revert Cap(); }
+        _checkLimits(market, isLong, margin, notional, price, pr.maxProfitMult);
 
         free[msg.sender] -= margin; totalFree -= margin; totalMargin += margin;
         if (isLong) liabLong[market] += margin * pr.maxProfitMult; else liabShort[market] += margin * pr.maxProfitMult;
@@ -287,7 +303,25 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         if (p.isLong) m.oiLong -= p.notional; else m.oiShort -= p.notional;
         uint256 l = uint256(p.margin) * paramsHistory[p.pv].maxProfitMult;
         if (p.isLong) liabLong[p.market] -= l; else liabShort[p.market] -= l;
+        walletMargin[p.owner] -= p.margin;
         delete positions[id]; delete marks[id];
+    }
+
+    function _checkLimits(uint32 market, bool isLong, uint256 margin, uint256 notional, uint256 price, uint256 mult) internal {
+        Limits memory L = limits;
+        if (notional < L.minNotional || (L.maxNotional != 0 && notional > L.maxNotional)) revert Margin();
+        uint256 wm = walletMargin[msg.sender] + margin;
+        if (L.maxWalletMargin != 0 && wm > L.maxWalletMargin) revert Cap();
+        walletMargin[msg.sender] = wm;
+        if (L.maxLiabPoolBps != 0) {
+            uint256 liab = (isLong ? liabLong[market] : liabShort[market]) + margin * mult;
+            if (liab * BPS > (pool + insurance) * L.maxLiabPoolBps) revert Cap();
+        }
+        if (L.maxJumpBps != 0) {
+            uint256 r = refPx[market];
+            if (r == 0 || block.timestamp >= refAt[market] + L.jumpWindow) { refPx[market] = price; refAt[market] = uint64(block.timestamp); }
+            else if ((price > r ? price - r : r - price) * BPS > r * L.maxJumpBps) revert Breaker();
+        }
     }
 
     /// @dev forfeited trader funds: `insBps` to the insurance fund, rest to the pool
@@ -432,6 +466,19 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         paramsHistory.push(c.p); ops = c.o; delete pendingConfig;
         emit ConfigApplied(uint32(paramsHistory.length - 1));
     }
+    function _validLimits(Limits memory l) internal pure {
+        if ((l.maxNotional != 0 && l.maxNotional < l.minNotional) || l.maxLiabPoolBps > 1_000_000 || l.maxJumpBps > 5000 || l.jumpWindow > 1 days
+            || (l.maxJumpBps != 0 && l.jumpWindow == 0)) revert BadParam();
+    }
+    /// @notice before launch (never unpaused): instant; afterwards use proposeLimits/applyLimits (configDelay)
+    function setLimitsPreLaunch(Limits calldata l) external onlyOwner { if (launched) revert Delay(); _validLimits(l); limits = l; emit LimitsSet(); }
+    function proposeLimits(Limits calldata l) external onlyOwner { _validLimits(l); pendingLimits = PendingLimits(l, uint64(block.timestamp) + configDelay, true); emit LimitsProposed(pendingLimits.at); }
+    function applyLimits() external onlyOwner {
+        PendingLimits memory q = pendingLimits;
+        if (!q.set) revert NothingPending();
+        if (block.timestamp < q.at) revert Delay();
+        limits = q.l; delete pendingLimits; emit LimitsSet();
+    }
     function cancelConfig() external onlyOwner { delete pendingConfig; emit ConfigCancelled(); }
 
     function proposeMarket(uint32 id, bool open_, uint256 capLong, uint256 capShort) external onlyOwner {
@@ -488,7 +535,7 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
 
     // ================================================================ instant safety controls
     function pause() external { if (msg.sender != owner() && msg.sender != guardian) revert NotGuardian(); _pause(); }
-    function unpause() external onlyOwner { emergencyMode = false; _unpause(); }
+    function unpause() external onlyOwner { emergencyMode = false; launched = true; _unpause(); }
     function setEmergencyMode(bool on) external onlyOwner { if (on && !paused()) revert NotEmergency(); emergencyMode = on; emit EmergencyModeSet(on); }
     /// @dev v3: renouncing would leave a paused exchange with positions that can never close or be rescued.
     function renounceOwnership() public pure override { revert BadParam(); }
