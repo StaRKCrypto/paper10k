@@ -115,32 +115,6 @@ contract AuditV4Test is Base {
         _solvent();
     }
 
-    // ---- F7: reserved liability
-    function test_ownerWithdrawBlockedBelowReserved() public {
-        // pool 10_000e6. alice long 150e6 (cap 100x => 15_000e6 liability) > pool
-        uint256 a = _open(alice, true, 150e6, 100);
-        uint256 b = _open(bob, false, 40e6, 100);           // opposite side: reserved = max(side), not sum
-        assertEq(ex.reservedLiability(), 150e6 * 100);
-        assertEq(ex.ownerWithdrawable(), 0);
-        vm.startPrank(owner);
-        ex.proposeWithdraw(owner, 1, false); vm.warp(block.timestamp + DELAY);
-        vm.expectRevert(Paper10kExchange.Reserved.selector); ex.applyWithdraw();
-        vm.stopPrank();
-        // after the long closes the reserve drops to bob's side
-        _next(); vm.prank(alice); ex.close(a);
-        assertEq(ex.reservedLiability(), 40e6 * 100);
-        assertEq(ex.ownerWithdrawable(), ex.pool() + ex.insurance() - 40e6 * 100);
-        vm.startPrank(owner);
-        ex.proposeWithdraw(owner, ex.ownerWithdrawable() + 1, false); vm.warp(block.timestamp + DELAY);
-        vm.expectRevert(); ex.applyWithdraw();              // one wei over the withdrawable amount
-        ex.proposeWithdraw(owner, ex.ownerWithdrawable(), false); vm.warp(block.timestamp + DELAY);
-        ex.applyWithdraw();
-        vm.stopPrank();
-        assertGe(ex.pool() + ex.insurance(), ex.reservedLiability());
-        _next(); vm.prank(bob); ex.close(b);
-        assertEq(ex.reservedLiability(), 0);
-        _solvent();
-    }
 
     function test_reservedReleasedOnLiquidationAndEmergency() public {
         uint256 id = _open(alice, true, 10e6, 10_000);
@@ -150,7 +124,7 @@ contract AuditV4Test is Base {
         orc.set(BTC, P0);
         uint256 id2 = _open(alice, true, 10e6, 10);
         assertEq(ex.reservedLiability(), 10e6 * 100);
-        vm.startPrank(owner); ex.pause(); ex.setEmergencyMode(true); vm.stopPrank();
+        vm.startPrank(owner); ex.pause(); vm.stopPrank();
         vm.prank(alice); ex.emergencyCancel(id2);
         assertEq(ex.reservedLiability(), 0);
     }
@@ -177,18 +151,4 @@ contract AuditV4Test is Base {
         _solvent();
     }
 
-    // ---- fuzz: reserved liability always equals the recomputed worst case and never lets withdrawals breach it
-    function testFuzz_reservedNeverBreachedByOwnerWithdraw(uint96 m1, uint96 m2, uint8 lev, uint96 wd) public {
-        m1 = uint96(bound(m1, 1e6, 200e6)); m2 = uint96(bound(m2, 1e6, 200e6)); lev = uint8(bound(lev, 1, 100));
-        _open(alice, true, m1, lev); _open(bob, false, m2, lev);
-        uint256 expect = uint256(m1 > m2 ? m1 : m2) * 100;
-        assertEq(ex.reservedLiability(), expect);
-        wd = uint96(bound(wd, 1, 20_000e6));
-        vm.startPrank(owner); ex.proposeWithdraw(owner, wd, false); vm.warp(block.timestamp + DELAY);
-        try ex.applyWithdraw() {} catch {}
-        vm.stopPrank();
-        // a successful withdrawal (pool+insurance dropped below the seed) must still leave the reserve covered
-        uint256 cash = ex.pool() + ex.insurance();
-        if (cash < 10_000e6) assertGe(cash, expect);
-    }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {_po, _ql} from "./Helpers.sol";
 import {Base, MockOracle} from "./Base.t.sol";
 import {Paper10kExchange} from "../src/Paper10kExchange.sol";
 import {HyperCoreOracle} from "../src/HyperCoreOracle.sol";
@@ -68,7 +69,7 @@ contract AuditV3Test is Base {
     function test_hugeNotionalRejected() public {
         Paper10kExchange.Params memory p = defParams(); p.maxMarginPerPosition = type(uint128).max;
         Paper10kExchange.Ops memory o = defOps(); o.maxTotalDeposits = type(uint128).max;
-        vm.startPrank(owner); ex.proposeConfig(p, o); vm.warp(block.timestamp + DELAY); ex.applyConfig(); vm.stopPrank();
+        vm.startPrank(owner); ex.setConfig(p, o); vm.warp(block.timestamp + DELAY);  vm.stopPrank();
         uint256 huge = uint256(type(uint128).max) / 1000; // x10000 leverage overflows uint128
         deal(address(usdc), alice, huge);
         vm.startPrank(alice); usdc.approve(address(ex), huge); ex.deposit(huge);
@@ -89,7 +90,7 @@ contract AuditV3Test is Base {
         uint256 qa = ex.queuedOf(alice); uint256 qb = ex.queuedOf(bob);
         assertGt(qa, 0); assertGt(qb, 0);
         assertEq(ex.queuedTotal(), qa + qb);
-        assertEq(ex.queueLength(), 2);
+        assertEq(_ql(ex), 2);
         // bob (second) must not be paid before alice, even if anyone calls processQueue repeatedly
         deal(address(usdc), address(this), 1_000_000e6); usdc.approve(address(ex), type(uint256).max);
         ex.fundInsurance(qa / 2);
@@ -97,20 +98,15 @@ contract AuditV3Test is Base {
         assertEq(ex.queuedOf(bob), qb);          // untouched
         assertLt(ex.queuedOf(alice), qa);        // head partially paid
         assertEq(ex.queuedTotal(), ex.queuedOf(alice) + ex.queuedOf(bob));
-        vm.startPrank(owner);
-        ex.proposeWithdraw(owner, 1, false);
-        vm.warp(block.timestamp + DELAY);
-        vm.expectRevert(Paper10kExchange.Cap.selector); ex.applyWithdraw();
-        vm.stopPrank();
         _solvent();
     }
 
     // closing a market is instant & protective but re-opening is timelocked
-    function test_reopenMarketIsTimelocked() public {
-        vm.prank(owner); ex.closeMarket(BTC);
+    function test_reopenMarketPreFinal() public {
+        vm.prank(owner); ex.setMarket(BTC, false, 1e12, 1e12);
         vm.prank(alice); vm.expectRevert(Paper10kExchange.MarketClosed.selector); ex.open(BTC, true, 10e6, 10, type(uint256).max);
-        vm.startPrank(owner); ex.proposeMarket(BTC, true, 1e12, 1e12);
-        vm.expectRevert(Paper10kExchange.Delay.selector); ex.applyMarket(BTC);
+        vm.startPrank(owner); ex.setMarket(BTC, true, 1e12, 1e12);
+
         vm.stopPrank();
     }
 }

@@ -48,7 +48,7 @@ contract FuzzTest is Base {
         Paper10kExchange.Params memory p = defParams();
         p.maintBps = uint16(bound(maint, 100, 5000)); p.winFeeBps = uint16(bound(fee, 0, 1000)); p.maxProfitMult = uint16(bound(cap, 1, 10_000));
         p.rateMultiplier = uint32(bound(rate, 1, 1e6)); p.deadbandWad = uint64(bound(dead, 0, 1e16)); p.maxLeverage = uint16(bound(maxLev, 1, 10_000));
-        vm.startPrank(owner); ex.proposeConfig(p, defOps()); vm.warp(block.timestamp + DELAY); ex.applyConfig(); vm.stopPrank();
+        vm.startPrank(owner); ex.setConfig(p, defOps()); vm.warp(block.timestamp + DELAY);  vm.stopPrank();
         vm.warp(block.timestamp + 1); orc.set(BTC, P0 + P0 / 200);
         assertEq(ex.bustPriceOf(id), bustB);
         (, , uint256 amtA,) = ex.previewClose(id);
@@ -64,16 +64,4 @@ contract FuzzTest is Base {
         assertEq(usdc.balanceOf(address(ex)), ex.totalFree() + ex.totalMargin() + ex.pool() + ex.insurance());
     }
 
-    /// owner can never extract more than pool/insurance surplus via timelocked withdraw
-    function testFuzz_ownerWithdrawBounded(uint256 amt, bool fromIns) public {
-        usdc.mintTo(address(this), 10_000e6); usdc.approve(address(ex), type(uint256).max); ex.fundInsurance(500e6);
-        amt = bound(amt, 0, 100_000e6);
-        vm.prank(owner); ex.proposeWithdraw(owner, amt, fromIns); vm.warp(block.timestamp + DELAY);
-        uint256 cap = fromIns ? ex.insurance() : ex.pool();
-        vm.prank(owner);
-        if (amt > cap) { vm.expectRevert(Paper10kExchange.Cap.selector); ex.applyWithdraw(); }
-        else ex.applyWithdraw();
-        assertGe(usdc.balanceOf(address(ex)), ex.totalFree() + ex.totalMargin());
-        _solvent();
-    }
 }

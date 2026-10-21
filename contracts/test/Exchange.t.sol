@@ -79,7 +79,7 @@ contract ExchangeTest is Base {
 
     function test_profitCapAndQueue_insuranceBacksPayout() public {
         // make the pool tiny; seed insurance so wins are paid from it after the pool
-        vm.startPrank(owner); ex.proposeWithdraw(owner, 10_000e6 - 100e6, false); vm.warp(block.timestamp + DELAY); ex.applyWithdraw(); vm.stopPrank();
+        vm.warp(block.timestamp + DELAY); _setPool(100e6);
         vm.warp(block.timestamp + 1); orc.set(BTC, P0);
         assertEq(ex.pool(), 100e6);
         vm.prank(alice); uint256 id = ex.open(BTC, true, 1_000e6, 100, P0);
@@ -93,9 +93,6 @@ contract ExchangeTest is Base {
         ex.processQueue(10);
         assertLt(ex.queuedOf(alice), q);
         _solvent();
-        // owner cannot withdraw while queue is owed
-        vm.prank(owner); ex.proposeWithdraw(owner, 1, false); vm.warp(block.timestamp + DELAY);
-        vm.prank(owner); vm.expectRevert(Paper10kExchange.Cap.selector); ex.applyWithdraw();
     }
 
     function test_pauseWithdrawAndEmergency() public {
@@ -103,22 +100,19 @@ contract ExchangeTest is Base {
         vm.prank(owner); ex.pause();
         vm.prank(alice); ex.withdraw(1_000e6);
         vm.prank(alice); vm.expectRevert(); ex.deposit(1e6);
-        vm.prank(alice); vm.expectRevert(Paper10kExchange.NotEmergency.selector); ex.emergencyCancel(id);
-        vm.prank(owner); ex.setEmergencyMode(true);
         vm.prank(bob); vm.expectRevert(Paper10kExchange.NotOwnerOfPosition.selector); ex.emergencyCancel(id);
         vm.prank(alice); ex.emergencyCancel(id);
         assertEq(ex.free(alice), 10_000e6 - 1_000e6); assertEq(ex.totalMargin(), 0);
         _solvent();
     }
 
-    function test_guardianCanPauseAndCloseMarketButNotUnpause() public {
+    function test_guardianCanPauseButNotUnpause() public {
         vm.prank(owner); ex.setGuardian(keeper);
-        vm.prank(keeper); ex.closeMarket(BTC);
+        vm.prank(owner); ex.setMarket(BTC, false, 1e12, 1e12);
         vm.prank(alice); vm.expectRevert(Paper10kExchange.MarketClosed.selector); ex.open(BTC, true, 10e6, 10, P0);
         vm.prank(keeper); ex.pause();
         vm.prank(keeper); vm.expectRevert(); ex.unpause();
         vm.prank(bob); vm.expectRevert(); ex.pause();
-        vm.prank(bob); vm.expectRevert(); ex.closeMarket(BTC);
     }
 
     function test_capsAndDepositCap() public {
@@ -126,24 +120,24 @@ contract ExchangeTest is Base {
         vm.prank(alice); vm.expectRevert(Paper10kExchange.Leverage.selector); ex.open(BTC, true, 10e6, 10_001, P0);
         address c = address(0xC); vm.startPrank(c); usdc.faucet(); usdc.approve(address(ex), type(uint256).max); vm.stopPrank();
         Paper10kExchange.Ops memory o = defOps(); o.maxTotalDeposits = 20_050e6;
-        vm.startPrank(owner); ex.proposeConfig(defParams(), o); vm.warp(block.timestamp + DELAY); ex.applyConfig(); vm.stopPrank();
+        vm.startPrank(owner); ex.setConfig(defParams(), o); vm.warp(block.timestamp + DELAY);  vm.stopPrank();
         vm.prank(c); vm.expectRevert(Paper10kExchange.Cap.selector); ex.deposit(100e6);
     }
 
-    function test_oracleTimelock() public {
+    function test_setOracleInstantPreFinal() public {
         MockOracle o2 = new MockOracle();
-        vm.prank(owner); ex.proposeOracle(o2);
-        vm.prank(owner); vm.expectRevert(Paper10kExchange.Delay.selector); ex.applyOracle();
+        vm.prank(owner); ex.setOracle(o2);
+        
         vm.warp(block.timestamp + DELAY);
-        vm.prank(owner); ex.applyOracle();
+
         assertEq(address(ex.oracle()), address(o2));
     }
 
     function test_stalePriceReverts() public {
         (address s, uint256 sk) = makeAddrAndKey("signer");
         SignedPriceOracle so = new SignedPriceOracle(owner, s);
-        vm.prank(owner); ex.proposeOracle(so); vm.warp(block.timestamp + DELAY);
-        vm.prank(owner); ex.applyOracle();
+        vm.prank(owner); ex.setOracle(so); vm.warp(block.timestamp + DELAY);
+
         uint64 ts = uint64(block.timestamp);
         bytes32 d = keccak256(abi.encodePacked("\x19\x01", so.domainSeparator(), keccak256(abi.encode(so.PRICE_TYPEHASH(), BTC, P0, ts))));
         (uint8 v, bytes32 r, bytes32 s_) = vm.sign(sk, d);
@@ -158,9 +152,8 @@ contract ExchangeTest is Base {
         vm.prank(alice); vm.expectRevert(Paper10kExchange.PriceBad.selector); ex.open(BTC, true, 10e6, 10, type(uint256).max);
     }
 
-    function test_unpauseClearsEmergencyMode() public {
-        vm.startPrank(owner); ex.pause(); ex.setEmergencyMode(true); ex.unpause(); vm.stopPrank();
-        assertFalse(ex.emergencyMode());
+    function test_emergencyCancelOnlyWhilePaused() public {
+        vm.startPrank(owner); ex.pause(); ex.unpause(); vm.stopPrank();
         vm.prank(alice); uint256 id = ex.open(BTC, true, 10e6, 10, P0);
         vm.prank(alice); vm.expectRevert(Paper10kExchange.NotEmergency.selector); ex.emergencyCancel(id);
     }

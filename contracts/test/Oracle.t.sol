@@ -103,7 +103,7 @@ contract HyperCoreOracleTest is Base {
     }
     /// exchange refuses to trade when the oracle fails closed
     function test_exchangeHaltsWhenOracleGuardTrips() public {
-        vm.prank(owner); ex.proposeOracle(h); vm.warp(block.timestamp + DELAY); vm.prank(owner); ex.applyOracle();
+        vm.prank(owner); ex.setOracle(h); vm.warp(block.timestamp + DELAY);
         // market 0 maps to BTC; price = 100000.5e18
         vm.prank(alice); ex.open(BTC, true, 10e6, 10, type(uint256).max);
         bbo.set(1_000_000, 1_100_000);
@@ -140,14 +140,31 @@ contract SignedOracleTest is Base {
 }
 
 contract TokenTest is Base {
-    function test_onlyMinterAndNonTransferable() public {
+    function test_onlyMinterAndFreelyTransferable() public {
         vm.expectRevert(Paper10kX.NotMinter.selector); x.mint(alice, 1);
         vm.prank(alice); uint256 id = ex.open(0, true, 10e6, 10_000, P0);
         orc.set(0, P0 / 2); _liq(id, address(this));
         assertGt(x.balanceOf(alice), 0);
-        vm.prank(alice); vm.expectRevert(Paper10kX.TransfersDisabled.selector); x.transfer(bob, 1);
+        vm.prank(alice); x.transfer(bob, 1); assertEq(x.balanceOf(bob), 1); // standard ERC-20, no gate the owner could toggle
         vm.prank(alice); x.burn(1);
         vm.prank(owner); vm.expectRevert(Paper10kX.MinterIsLocked.selector); x.setMinter(owner, false);
+    }
+    function test_permitEIP2612() public {
+        uint256 pk = 0xA11CE5; address holder = vm.addr(pk);
+        vm.prank(address(ex)); x.mint(holder, 1e18);
+        uint256 dl = block.timestamp + 1 hours;
+        bytes32 h = keccak256(abi.encodePacked("\x19\x01", x.DOMAIN_SEPARATOR(), keccak256(abi.encode(
+            keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"), holder, bob, 5e17, x.nonces(holder), dl))));
+        (uint8 v, bytes32 r, bytes32 s_) = vm.sign(pk, h);
+        x.permit(holder, bob, 5e17, dl, v, r, s_);
+        assertEq(x.allowance(holder, bob), 5e17);
+        vm.prank(bob); x.transferFrom(holder, bob, 5e17); assertEq(x.balanceOf(bob), 5e17);
+    }
+    function testFuzz_transfersNeverBlocked(address to, uint96 amt) public {
+        vm.assume(to != address(0));
+        vm.prank(address(ex)); uint256 m = x.mint(alice, amt);
+        vm.prank(alice); x.transfer(to, m);
+        if (to != alice) assertEq(x.balanceOf(alice), 0);
     }
     function test_capNeverReverts() public {
         Paper10kX t = new Paper10kX(owner, 100);

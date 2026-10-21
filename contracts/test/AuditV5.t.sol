@@ -46,7 +46,7 @@ contract AuditV5Test is Base {
         vm.assume(sybil != address(0) && sybil != alice && sybil != address(ex) && sybil != owner && sybil != address(usdc) && sybil != address(x));
         margin = uint96(bound(margin, 1e6, 1_000e6)); bps = uint16(bound(bps, 0, 1000)); cap = uint96(bound(cap, 0, 1_000e6));
         Paper10kExchange.Ops memory o = defOps(); o.bountyBps = bps; o.bountyCap = cap;
-        vm.startPrank(owner); ex.proposeConfig(defParams(), o); vm.warp(block.timestamp + DELAY); ex.applyConfig(); vm.stopPrank();
+        vm.startPrank(owner); ex.setConfig(defParams(), o); vm.warp(block.timestamp + DELAY);  vm.stopPrank();
         _next(); orc.set(BTC, P0);
         uint256 before = ex.free(alice) + ex.free(sybil); uint256 sy0 = ex.free(sybil);
         uint256 id = _open(alice, margin); _bust();
@@ -65,7 +65,7 @@ contract AuditV5Test is Base {
         vm.assume(caller != address(0) && caller != address(ex) && caller != owner && caller != address(usdc) && caller != address(x));
         margin = uint96(bound(margin, 1e6, 1_000e6)); bps = uint16(bound(bps, 0, 1000)); cap = uint96(bound(cap, 0, 1_000e6));
         Paper10kExchange.Ops memory o = defOps(); o.bountyBps = bps; o.bountyCap = cap;
-        vm.startPrank(owner); ex.proposeConfig(defParams(), o); vm.warp(block.timestamp + DELAY); ex.applyConfig(); vm.stopPrank();
+        vm.startPrank(owner); ex.setConfig(defParams(), o); vm.warp(block.timestamp + DELAY);  vm.stopPrank();
         _next(); orc.set(BTC, P0);
         uint256 id = _open(alice, margin); _bust();
         uint256 hp = ex.pool() + ex.insurance(); uint256 f = ex.free(caller);
@@ -80,7 +80,7 @@ contract AuditV5Test is Base {
 
     function test_bountyParamsValidated() public {
         Paper10kExchange.Ops memory o = defOps(); o.bountyBps = 1001;
-        vm.prank(owner); vm.expectRevert(Paper10kExchange.BadParam.selector); ex.proposeConfig(defParams(), o);
+        vm.prank(owner); vm.expectRevert(Paper10kExchange.BadParam.selector); ex.setConfig(defParams(), o);
     }
 
     /// bounty is never taken from insurance and does not depend on pool/insurance balances (works with an empty house)

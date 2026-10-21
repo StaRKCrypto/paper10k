@@ -22,10 +22,14 @@ import {Paper10kX} from "./Paper10kX.sol";
 ///   insurance   backstop: fed by `insuranceBps` of every forfeited loss and by anyone; pays winners only after the pool is empty
 ///  Wins that pool+insurance cannot cover become queued debt (unbacked) paid FIFO from future inflows.
 ///
-///  Governance (all behind `configDelay`, a TIMELOCK): risk Params are VERSIONED. Every position snapshots the Params version that
+///  Governance (v6, immutable launch): every setter is owner-only AND pre-finalize() only; finalize() is one-way, after which the owner
+///  renounces and nothing economic can change (`configDelay` is kept only as a constructor sanity value). Risk Params are VERSIONED. Every position snapshots the Params version that
 ///  was current when it opened and settles under THAT version, so a config change can never alter an open position's leverage cap,
 ///  maintenance margin, haircut, fee, profit cap, deadband or mint rate. Owner CANNOT instantly change anything economic; owner CAN
 ///  instantly: pause (also guardian), close a market, and (via 2-step) seed/transfer ownership.
+interface IFillOracle { function fillPrice(uint32 market, bytes[] calldata data, uint64 minTs, uint64 maxTs) external payable returns (uint256); }
+interface IStakingSink { function totalStaked() external view returns (uint256); function notifyReward(uint256 amount) external; }
+
 contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -53,26 +57,42 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     struct Ops { uint128 maxTotalDeposits; uint64 maxPriceAge; uint64 minHold; uint16 bountyBps; uint128 bountyCap; }
     Ops public ops;
 
-    struct PendingConfig { Params p; Ops o; uint64 at; bool set; }
-    PendingConfig public pendingConfig;
 
     // oracle
     IPriceOracle public oracle;
-    IPriceOracle public pendingOracle;
-    uint64 public pendingOracleAt;
 
     address public guardian;
 
-    /// @notice launch risk limits (Papertrade-style). 0 = disabled. Instant only before the first unpause(), then timelocked (configDelay).
+    /// @notice launch risk limits (Papertrade-style). 0 = disabled. Settable only before finalize(), then fixed forever.
     ///   minNotional/maxNotional: per-position notional bounds (collateral units; Papertrade: $10k min, $10M max per position).
     ///   maxWalletMargin: total open margin per wallet. maxLiabPoolBps: per market+side, worst-case reserved liability
     ///   (margin x maxProfitMult) <= (pool+insurance) x bps (LP utilisation cap). maxJumpBps: oracle circuit breaker, opens revert
-    ///   while the price is more than maxJumpBps from the reference price, which re-anchors at most every jumpWindow seconds.
-    struct Limits { uint128 minNotional; uint128 maxNotional; uint128 maxWalletMargin; uint32 maxLiabPoolBps; uint16 maxJumpBps; uint32 jumpWindow; }
+    ///   while the price is more than maxJumpBps from the reference price, which re-anchors at most every jumpWindow seconds. maxPayoutPoolBps: one position's
+    ///   worst-case payout (margin x maxProfitMult) <= (pool+insurance) x bps, else PoolTooSmall (max size = % of pool).
+    ///   walletMaxMult: open margin per wallet <= maxMarginNow() x mult. mintDecayPool: PAPER10KX mint rate halves for every doubling of
+    ///   pool+insurance above this level (0 = flat).
+    struct Limits { uint128 minNotional; uint128 maxNotional; uint128 maxWalletMargin; uint32 maxLiabPoolBps; uint16 maxJumpBps; uint32 jumpWindow; uint16 maxPayoutPoolBps; uint16 walletMaxMult; uint64 mintDecayPool; }
     Limits public limits;
-    struct PendingLimits { Limits l; uint64 at; bool set; }
-    PendingLimits public pendingLimits;
-    bool public launched;
+    /// @notice one-way immutability switch. After finalize(): every propose/apply/setter, pause, closeMarket, emergency mode,
+    ///         owner withdrawals and rescue revert forever; the owner then renounces. Rules can never change again.
+    bool public finalized;
+    uint64 public finalizedAt;
+    uint64 public finalizedBlock;
+    /// @notice the ONLY post-launch control: the guardian may halt NEW opens for HALT_SECS, at most MAX_HALTS times ever.
+    ///         Closes, liquidations, deposits, withdrawals, staking flows are never affected. guardian = 0 disables it.
+    uint64 public opensHaltedUntil;
+    uint8 public haltsUsed;
+    uint64 public constant HALT_SECS = 72 hours;
+    uint8 public constant MAX_HALTS = 3;
+    /// @notice last time a fresh oracle price was used; if no fresh price for ORACLE_DEAD_SECS, owners can cancel at margin
+    uint64 public lastPriceOk;
+    uint64 public constant ORACLE_DEAD_SECS = 7 days;
+    /// @notice PAPER10KX staking revenue (Papertrade-style). Set before finalize, then fixed.
+    address public staking;
+    uint16 public stakerLossBps;   // share of every realised trader loss / liquidation inflow
+    uint16 public stakerFeeBps;    // share of every win fee
+    uint256 public stakerCap;      // pool above max(stakerCap, reserved liability) is swept to stakers (0 = off)
+    uint256 public stakerAccrued;  // collateral owed to stakers, held here until sweepStakers()
     mapping(address => uint256) public walletMargin;
     /// @notice close-only operators (e.g. the TriggerOrders periphery for TP/SL). An operator can only call close() on the owner's
     ///         positions; proceeds always go to the position owner; it can never open, withdraw or move funds.
@@ -81,12 +101,9 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     mapping(address => uint256) public rektCount;
     mapping(uint32 => uint256) public refPx;
     mapping(uint32 => uint64) public refAt;
-    bool public emergencyMode;
 
     struct Market { bool listed; bool open; uint256 oiCapLong; uint256 oiCapShort; uint256 oiLong; uint256 oiShort; }
     mapping(uint32 => Market) public markets;
-    struct PendingMarket { bool open; uint256 capLong; uint256 capShort; uint64 at; bool set; }
-    mapping(uint32 => PendingMarket) public pendingMarket;
 
     struct Position {
         address owner; uint32 market; uint16 leverage; uint32 pv; bool isLong;
@@ -119,8 +136,6 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     uint256 public queuedTotal;
     mapping(address => uint256) public queuedOf;
 
-    struct PendingWithdraw { address to; uint256 amount; bool fromInsurance; uint64 at; bool set; }
-    PendingWithdraw public pendingWithdraw;
 
     // ---------------------------------------------------------------- events
     event Deposit(address indexed user, uint256 amount);
@@ -135,23 +150,17 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     event MarkCleared(uint256 indexed id);
     event EmergencyCancelled(uint256 indexed id, address indexed user, uint256 margin);
     event QueuePaid(address indexed user, uint256 amount);
-    event ConfigProposed(uint64 effectiveAt);
     event ConfigApplied(uint32 version);
-    event ConfigCancelled();
-    event OracleProposed(address oracle, uint64 effectiveAt);
     event OracleSet(address oracle);
-    event MarketProposed(uint32 indexed market, bool open, uint256 oiCapLong, uint256 oiCapShort, uint64 effectiveAt);
     event MarketSet(uint32 indexed market, bool open, uint256 oiCapLong, uint256 oiCapShort);
-    event WithdrawProposed(address to, uint256 amount, bool fromInsurance, uint64 effectiveAt);
-    event WithdrawApplied(address to, uint256 amount, bool fromInsurance);
-    event EmergencyModeSet(bool on);
     event GuardianSet(address g);
 
     event OperatorSet(address indexed user, address indexed op, bool on);
-    event LimitsSet(); event LimitsProposed(uint64 at);
+    event Finalized(uint256 blockNo); event OpensHalted(uint64 until, uint8 used); event StakersPaid(uint256 amount, bool toPool);
+    event LimitsSet();
     error BadParam(); error NotListed(); error MarketClosed(); error Leverage(); error Margin(); error Cap();
     error PriceBad(); error Slippage(); error NotOwnerOfPosition(); error TooSoon(); error NotLiquidatable();
-    error MarkNotReady(); error StillBusted(); error Reserved(); error InsufficientFree(); error TransferMismatch(); error NotEmergency(); error NotGuardian(); error Delay(); error NothingPending(); error Breaker();
+    error MarkNotReady(); error StillBusted(); error Reserved(); error InsufficientFree(); error TransferMismatch(); error NotEmergency(); error NotGuardian(); error Delay(); error NothingPending(); error Breaker(); error PoolTooSmall(); error Final(); error Halted();
 
     constructor(
         address owner_, IERC20 collateral_, uint8 collateralDecimals, Paper10kX px_, IPriceOracle oracle_,
@@ -165,6 +174,8 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         paramsHistory.push(p0); ops = o0;
         _pause(); // deployed PAUSED
     }
+
+    modifier notFinal() { if (finalized) revert Final(); _; }
 
     // ================================================================ user: funds
     function deposit(uint256 amount) external nonReentrant whenNotPaused {
@@ -189,8 +200,24 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     // ================================================================ trading
+    /// @notice instant open at the stored oracle price. ONLY before finalize() (bootstrap/tests). After finalize every open and close
+    ///         is two-step (requestOpen/requestClose -> fill) at the UNIQUE first Pyth price published after the request (SEC-3).
     function open(uint32 market, bool isLong, uint256 margin, uint32 leverage, uint256 worstPrice)
         external nonReentrant whenNotPaused returns (uint256 id)
+    {
+        if (finalized) revert Final();
+        _lock(msg.sender, margin);
+        id = _open(msg.sender, market, isLong, margin, leverage, worstPrice, _price(market));
+    }
+
+    function _lock(address u, uint256 margin) internal {
+        if (free[u] < margin) revert InsufficientFree();
+        free[u] -= margin; totalFree -= margin; totalMargin += margin;
+    }
+
+    /// @dev margin is already locked (moved free -> totalMargin) by the caller
+    function _open(address trader, uint32 market, bool isLong, uint256 margin, uint32 leverage, uint256 worstPrice, uint256 price)
+        internal returns (uint256 id)
     {
         Market storage m = markets[market];
         if (!m.listed) revert NotListed();
@@ -199,29 +226,103 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         Params memory pr = paramsHistory[pv];
         if (leverage == 0 || leverage > pr.maxLeverage) revert Leverage();
         if (margin < pr.minMargin || margin > pr.maxMarginPerPosition) revert Margin();
-        if (free[msg.sender] < margin) revert InsufficientFree();
-        uint256 price = _price(market);
+        if (block.timestamp < opensHaltedUntil) revert Halted();
+        lastPriceOk = uint64(block.timestamp);
         if (isLong ? price > worstPrice : price < worstPrice) revert Slippage();
         uint256 notional = margin * leverage;
         if (notional > type(uint128).max) revert Margin(); // v3: no silent uint128 truncation of notional
         if (isLong) { m.oiLong += notional; if (m.oiLong > m.oiCapLong) revert Cap(); }
         else { m.oiShort += notional; if (m.oiShort > m.oiCapShort) revert Cap(); }
-        _checkLimits(market, isLong, margin, notional, price, pr.maxProfitMult);
-
-        free[msg.sender] -= margin; totalFree -= margin; totalMargin += margin;
+        _checkLimits(trader, market, isLong, margin, notional, price, pr.maxProfitMult);
         if (isLong) liabLong[market] += margin * pr.maxProfitMult; else liabShort[market] += margin * pr.maxProfitMult;
         id = nextPositionId++;
-        positions[id] = Position(msg.sender, market, uint16(leverage), pv, isLong, uint128(margin), uint128(notional), uint128(price), uint64(block.timestamp), uint32(block.number));
-        emit Opened(id, msg.sender, market, isLong, margin, notional, price, leverage);
+        positions[id] = Position(trader, market, uint16(leverage), pv, isLong, uint128(margin), uint128(notional), uint128(price), uint64(block.timestamp), uint32(block.number));
+        emit Opened(id, trader, market, isLong, margin, notional, price, leverage);
     }
+
+    // ================================================================ SEC-3: two-step orders (the only trade path after finalize)
+    /// Stale-price arbitrage fix. A request locks margin (opens) or flags the position (closes) at time T. Anyone may fill it with Pyth
+    /// update data; the oracle verifies it via parsePriceFeedUpdatesUnique(minPublishTime = T + FILL_DELAY): the FIRST Pyth price published
+    /// at/after that instant. The price is unknown at request time and unique, so neither the trader nor the filler can choose it.
+    /// The trader cannot cancel; an unfillable request (oracle outage) can be cancelled by anyone after REQ_TIMEOUT (margin refunded).
+    /// One pending close per position, so a close the trader dislikes cannot be abandoned and re-requested.
+    struct Req { address trader; uint64 ts; uint32 market; uint32 leverage; bool isLong; uint128 margin; uint128 worst; uint256 posId; }
+    mapping(uint256 => Req) public reqs;
+    mapping(uint256 => uint256) public closeReq; // position id => pending request id
+    uint256 public nextReq = 1;
+    uint64 public constant FILL_DELAY = 1;
+    uint64 public constant FILL_WINDOW = 10;
+    uint64 public constant REQ_TIMEOUT = 1 days;
+    event Requested(uint256 indexed rid, address indexed trader, uint256 posId);
+    event Filled(uint256 indexed rid, uint256 posId, uint256 price);
+
+    function requestOpen(uint32 market, bool isLong, uint256 margin, uint32 leverage, uint256 worstPrice)
+        external nonReentrant whenNotPaused returns (uint256 rid)
+    {
+        if (margin > type(uint128).max || worstPrice > type(uint128).max) revert Margin();
+        _lock(msg.sender, margin);
+        rid = nextReq++;
+        reqs[rid] = Req(msg.sender, uint64(block.timestamp), market, leverage, isLong, uint128(margin), uint128(worstPrice), 0);
+        emit Requested(rid, msg.sender, 0);
+    }
+
+    function requestClose(uint256 id) external nonReentrant {
+        Position memory p = positions[id];
+        if (p.owner != msg.sender && !isOperator[p.owner][msg.sender]) revert NotOwnerOfPosition();
+        if (closeReq[id] != 0) revert Delay();
+        uint256 rid = nextReq++;
+        reqs[rid] = Req(p.owner, uint64(block.timestamp), p.market, 0, false, 0, 0, id);
+        closeReq[id] = rid;
+        emit Requested(rid, p.owner, id);
+    }
+
+    /// @notice permissionless keeper call. msg.value pays the Pyth update fee.
+    function fill(uint256 rid, bytes[] calldata data) external payable nonReentrant whenNotPaused {
+        Req memory r = reqs[rid];
+        if (r.ts == 0) revert NothingPending();
+        uint64 t = r.ts + FILL_DELAY;
+        uint256 price = IFillOracle(address(oracle)).fillPrice{value: msg.value}(r.market, data, t, t + FILL_WINDOW);
+        if (price == 0 || price > type(uint128).max) revert PriceBad();
+        delete reqs[rid];
+        lastPriceOk = uint64(block.timestamp);
+        uint256 pid = r.posId;
+        if (pid != 0) {
+            delete closeReq[pid];
+            if (positions[pid].owner != address(0)) _close(pid, price); // liquidated meanwhile => nothing to do
+        } else {
+            try this.execOpen(r, price) returns (uint256 id) { pid = id; } catch { _unlock(r.trader, r.margin); }
+        }
+        emit Filled(rid, pid, price);
+    }
+
+    function execOpen(Req calldata r, uint256 price) external returns (uint256) {
+        if (msg.sender != address(this)) revert NotGuardian();
+        return _open(r.trader, r.market, r.isLong, r.margin, r.leverage, r.worst, price);
+    }
+
+    function cancelRequest(uint256 rid) external nonReentrant {
+        Req memory r = reqs[rid];
+        if (r.ts == 0 || block.timestamp <= r.ts + REQ_TIMEOUT) revert TooSoon();
+        delete reqs[rid];
+        if (r.posId != 0) delete closeReq[r.posId]; else _unlock(r.trader, r.margin);
+        emit Filled(rid, 0, 0);
+    }
+
+    function _unlock(address u, uint256 margin) internal { totalMargin -= margin; free[u] += margin; totalFree += margin; }
 
     /// @notice voluntary close. Not in the same block as open and not before `minHold`. Past bust => it is a liquidation.
     function close(uint256 id) external nonReentrant whenNotPaused {
+        if (finalized) revert Final();
         Position memory p = positions[id];
         if (p.owner != msg.sender && !isOperator[p.owner][msg.sender]) revert NotOwnerOfPosition();
+        lastPriceOk = uint64(block.timestamp);
+        _close(id, _price(p.market));
+    }
+
+    function _close(uint256 id, uint256 price) internal {
+        Position memory p = positions[id];
         if (block.timestamp < p.openedAt + ops.minHold || block.number <= p.openedBlock) revert TooSoon();
         Params memory pr = paramsHistory[p.pv];
-        uint256 price = _price(p.market);
         // v4: a hard bust on voluntary close needs the multi-source liquidation price to agree. If it is unavailable (F8) or does not agree,
         // the close proceeds at the primary price; a position past maintenance then simply realises its (capped) loss.
         (bool lok, uint256 lp) = _liqPrice(p);
@@ -236,6 +337,10 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         } else {
             free[p.owner] += p.margin; totalFree += p.margin;
             (uint256 paid, uint256 queued) = _payProfit(p.owner, amt);
+            if (staking != address(0) && queued == 0) { // staker share of the win fee, only if the pool covers it
+                uint256 cut = amt * pr.winFeeBps / (BPS - pr.winFeeBps) * stakerFeeBps / BPS;
+                if (cut <= pool) { pool -= cut; stakerAccrued += cut; }
+            }
             emit Closed(id, p.owner, price, p.margin, paid, queued, 0);
         }
     }
@@ -300,7 +405,7 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         }
         if (bounty > 0) { free[keeper] += bounty; totalFree += bounty; emit BountyPaid(id, keeper, bounty); }
         _inflow(p.margin - bounty, pr.insuranceBps);
-        uint256 minted = px.mint(p.owner, uint256(p.margin) * mintScale * pr.mintPerCollateral);
+        uint256 minted = px.mint(p.owner, uint256(p.margin) * mintScale * mintRateNow(pr.mintPerCollateral));
         rektCount[p.owner]++;
         emit Liquidated(id, p.owner, keeper, price, p.margin, minted);
     }
@@ -316,15 +421,18 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         delete positions[id]; delete marks[id];
     }
 
-    function _checkLimits(uint32 market, bool isLong, uint256 margin, uint256 notional, uint256 price, uint256 mult) internal {
+    function _checkLimits(address trader, uint32 market, bool isLong, uint256 margin, uint256 notional, uint256 price, uint256 mult) internal {
         Limits memory L = limits;
         if (notional < L.minNotional || (L.maxNotional != 0 && notional > L.maxNotional)) revert Margin();
-        uint256 wm = walletMargin[msg.sender] + margin;
-        if (L.maxWalletMargin != 0 && wm > L.maxWalletMargin) revert Cap();
-        walletMargin[msg.sender] = wm;
+        uint256 wm = walletMargin[trader] + margin;
+        if ((L.maxWalletMargin != 0 && wm > L.maxWalletMargin) || (L.walletMaxMult != 0 && wm > maxMarginNow() * L.walletMaxMult)) revert Cap();
+        walletMargin[trader] = wm;
+        if (L.maxPayoutPoolBps != 0 && margin * mult * BPS > (pool + insurance) * L.maxPayoutPoolBps) revert PoolTooSmall();
         if (L.maxLiabPoolBps != 0) {
             uint256 liab = (isLong ? liabLong[market] : liabShort[market]) + margin * mult;
-            if (liab * BPS > (pool + insurance) * L.maxLiabPoolBps) revert Cap();
+            // SEC-1: capital owed to queued winners is not free LP capital
+            uint256 house = pool + insurance; house = house > queuedTotal ? house - queuedTotal : 0;
+            if (liab * BPS > house * L.maxLiabPoolBps) revert Cap();
         }
         if (L.maxJumpBps != 0) {
             uint256 r = refPx[market];
@@ -335,6 +443,7 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
 
     /// @dev forfeited trader funds: `insBps` to the insurance fund, rest to the pool
     function _inflow(uint256 amt, uint256 insBps) internal {
+        if (staking != address(0) && queueHead >= queue.length) { uint256 cut = amt * stakerLossBps / BPS; stakerAccrued += cut; amt -= cut; }
         uint256 ins = amt * insBps / BPS;
         insurance += ins; pool += amt - ins;
     }
@@ -367,12 +476,10 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         }
     }
 
-    function positionOwner(uint256 id) external view returns (address) { return positions[id].owner; }
-    function queueLength() external view returns (uint256) { return queue.length - queueHead; }
 
     // ================================================================ emergency (user-protective)
     function emergencyCancel(uint256 id) external nonReentrant {
-        if (!emergencyMode || !paused()) revert NotEmergency();
+        if (!(paused() && !finalized) && !(lastPriceOk != 0 && block.timestamp > lastPriceOk + ORACLE_DEAD_SECS)) revert NotEmergency();
         Position memory p = positions[id];
         if (p.owner != msg.sender) revert NotOwnerOfPosition();
         _removePosition(id, p);
@@ -383,16 +490,25 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     // ================================================================ views
     /// @notice worst-case payout the house could owe if the price moved fully in one direction on every market at once:
     ///         per market the larger side's sum of (margin * maxProfitMult); summed over markets (cross-market correlation assumed).
+    /// @notice current max margin per position: min(hard cap, (pool+insurance) x maxPayoutPoolBps / maxProfitMult) — grows with the pool
+    function maxMarginNow() public view returns (uint256 m) {
+        Params memory pr = paramsHistory[paramsHistory.length - 1];
+        m = pr.maxMarginPerPosition;
+        uint256 bps = limits.maxPayoutPoolBps;
+        if (bps != 0) { uint256 d = (pool + insurance) * bps / BPS / pr.maxProfitMult; if (d < m) m = d; }
+    }
+    /// @notice PAPER10KX per collateral unit right now (halves per doubling of pool+insurance above mintDecayPool)
+    function mintRateNow(uint256 base) public view returns (uint256) {
+        uint256 x = limits.mintDecayPool; uint256 pv = pool + insurance;
+        if (x == 0 || pv < x) return base;
+        uint256 h = Math.log2(pv / x) + 1;
+        return h >= 64 ? 0 : base >> h;
+    }
     function reservedLiability() public view returns (uint256 r) {
         for (uint256 i = 0; i < marketIds.length; i++) {
             uint32 id = marketIds[i]; uint256 a = liabLong[id]; uint256 b = liabShort[id];
             r += a > b ? a : b;
         }
-    }
-    /// @notice how much house capital (pool+insurance) the owner could withdraw right now ignoring the delay
-    function ownerWithdrawable() external view returns (uint256) {
-        uint256 cash = pool + insurance; uint256 r = reservedLiability();
-        return queuedTotal != 0 || cash <= r ? 0 : cash - r;
     }
     function paramsVersion() external view returns (uint256) { return paramsHistory.length - 1; }
     function currentParams() external view returns (Params memory) { return paramsHistory[paramsHistory.length - 1]; }
@@ -462,92 +578,64 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         if (o.bountyBps > 1000) revert BadParam();
     }
 
-    /// @notice propose new risk params + ops. After `configDelay` anyone-visible window the owner applies; new Params apply ONLY to positions opened afterwards.
-    function proposeConfig(Params calldata p, Ops calldata o) external onlyOwner {
+    /// @notice v6 (immutable launch): NO timelock is needed because every setter works ONLY before finalize(), and after finalize nothing
+    ///         economic can ever change again. New Params apply only to positions opened afterwards (versioned).
+    function setConfig(Params calldata p, Ops calldata o) external onlyOwner notFinal {
         _validate(p, o);
-        pendingConfig = PendingConfig(p, o, uint64(block.timestamp) + configDelay, true);
-        emit ConfigProposed(pendingConfig.at);
-    }
-    function applyConfig() external onlyOwner {
-        PendingConfig memory c = pendingConfig;
-        if (!c.set) revert NothingPending();
-        if (block.timestamp < c.at) revert Delay();
-        paramsHistory.push(c.p); ops = c.o; delete pendingConfig;
+        paramsHistory.push(p); ops = o;
         emit ConfigApplied(uint32(paramsHistory.length - 1));
     }
     function _validLimits(Limits memory l) internal pure {
-        if ((l.maxNotional != 0 && l.maxNotional < l.minNotional) || l.maxLiabPoolBps > 1_000_000 || l.maxJumpBps > 5000 || l.jumpWindow > 1 days
+        if ((l.maxNotional != 0 && l.maxNotional < l.minNotional) || l.maxLiabPoolBps > 1_000_000 || l.maxJumpBps > 5000 || l.jumpWindow > 1 days || l.maxPayoutPoolBps > BPS
             || (l.maxJumpBps != 0 && l.jumpWindow == 0)) revert BadParam();
     }
-    /// @notice before launch (never unpaused): instant; afterwards use proposeLimits/applyLimits (configDelay)
-    function setLimitsPreLaunch(Limits calldata l) external onlyOwner { if (launched) revert Delay(); _validLimits(l); limits = l; emit LimitsSet(); }
-    function proposeLimits(Limits calldata l) external onlyOwner { _validLimits(l); pendingLimits = PendingLimits(l, uint64(block.timestamp) + configDelay, true); emit LimitsProposed(pendingLimits.at); }
-    function applyLimits() external onlyOwner {
-        PendingLimits memory q = pendingLimits;
-        if (!q.set) revert NothingPending();
-        if (block.timestamp < q.at) revert Delay();
-        limits = q.l; delete pendingLimits; emit LimitsSet();
-    }
-    function cancelConfig() external onlyOwner { delete pendingConfig; emit ConfigCancelled(); }
-
-    function proposeMarket(uint32 id, bool open_, uint256 capLong, uint256 capShort) external onlyOwner {
-        pendingMarket[id] = PendingMarket(open_, capLong, capShort, uint64(block.timestamp) + configDelay, true);
-        emit MarketProposed(id, open_, capLong, capShort, pendingMarket[id].at);
-    }
-    function applyMarket(uint32 id) external onlyOwner {
-        PendingMarket memory pm = pendingMarket[id];
-        if (!pm.set) revert NothingPending();
-        if (block.timestamp < pm.at) revert Delay();
+    function setLimits(Limits calldata l) external onlyOwner notFinal { _validLimits(l); limits = l; emit LimitsSet(); }
+    function setMarket(uint32 id, bool open_, uint256 capLong, uint256 capShort) external onlyOwner notFinal {
         Market storage m = markets[id];
         if (!m.listed) marketIds.push(id);
-        m.listed = true; m.open = pm.open; m.oiCapLong = pm.capLong; m.oiCapShort = pm.capShort;
-        delete pendingMarket[id];
-        emit MarketSet(id, pm.open, pm.capLong, pm.capShort);
-    }
-    /// @notice instant, protective: stop new positions on a market (existing positions keep settling)
-    function closeMarket(uint32 id) external {
-        if (msg.sender != owner() && msg.sender != guardian) revert NotGuardian();
-        markets[id].open = false;
-        emit MarketSet(id, false, markets[id].oiCapLong, markets[id].oiCapShort);
+        m.listed = true; m.open = open_; m.oiCapLong = capLong; m.oiCapShort = capShort;
+        emit MarketSet(id, open_, capLong, capShort);
     }
 
-    function proposeOracle(IPriceOracle o) external onlyOwner {
-        require(address(o) != address(0), "0");
-        pendingOracle = o; pendingOracleAt = uint64(block.timestamp) + configDelay;
-        emit OracleProposed(address(o), pendingOracleAt);
+    function setOracle(IPriceOracle o) external onlyOwner notFinal {
+        if (address(o) == address(0)) revert BadParam();
+        oracle = o; emit OracleSet(address(o));
     }
-    function applyOracle() external onlyOwner {
-        if (address(pendingOracle) == address(0) || block.timestamp < pendingOracleAt) revert Delay();
-        oracle = pendingOracle; pendingOracle = IPriceOracle(address(0));
-        emit OracleSet(address(oracle));
-    }
-
-    /// @notice withdrawing house capital (pool surplus or insurance) is timelocked and can never dip into queued-win reserves
-    function proposeWithdraw(address to, uint256 amount, bool fromInsurance) external onlyOwner {
-        require(to != address(0), "to");
-        pendingWithdraw = PendingWithdraw(to, amount, fromInsurance, uint64(block.timestamp) + configDelay, true);
-        emit WithdrawProposed(to, amount, fromInsurance, pendingWithdraw.at);
-    }
-    function applyWithdraw() external onlyOwner nonReentrant {
-        PendingWithdraw memory w = pendingWithdraw;
-        if (!w.set) revert NothingPending();
-        if (block.timestamp < w.at) revert Delay();
-        delete pendingWithdraw;
-        if (queuedTotal != 0) revert Cap(); // never while winners are owed
-        if (pool + insurance - (w.fromInsurance ? Math.min(w.amount, insurance) : Math.min(w.amount, pool)) < reservedLiability()) revert Reserved(); // v4 F7
-        if (w.fromInsurance) { if (w.amount > insurance) revert Cap(); insurance -= w.amount; }
-        else { if (w.amount > pool) revert Cap(); pool -= w.amount; }
-        collateral.safeTransfer(w.to, w.amount);
-        emit WithdrawApplied(w.to, w.amount, w.fromInsurance);
-    }
-    function cancelWithdraw() external onlyOwner { delete pendingWithdraw; }
 
     // ================================================================ instant safety controls
-    function pause() external { if (msg.sender != owner() && msg.sender != guardian) revert NotGuardian(); _pause(); }
-    function unpause() external onlyOwner { emergencyMode = false; launched = true; _unpause(); }
-    function setEmergencyMode(bool on) external onlyOwner { if (on && !paused()) revert NotEmergency(); emergencyMode = on; emit EmergencyModeSet(on); }
+    function pause() external notFinal { if (msg.sender != owner() && msg.sender != guardian) revert NotGuardian(); _pause(); }
+    function unpause() external onlyOwner notFinal { _unpause(); }
     /// @dev v3: renouncing would leave a paused exchange with positions that can never close or be rescued.
-    function renounceOwnership() public pure override { revert BadParam(); }
-    function setGuardian(address g) external onlyOwner { guardian = g; emit GuardianSet(g); }
-    function rescueToken(IERC20 t, address to, uint256 amount) external onlyOwner { require(address(t) != address(collateral), "collateral"); t.safeTransfer(to, amount); }
+    function renounceOwnership() public override onlyOwner { if (!finalized) revert BadParam(); _transferOwnership(address(0)); }
+
+    /// @notice set the staking sink and its shares once, before finalize (then fixed forever)
+    function setStaking(address s_, uint16 lossBps, uint16 feeBps, uint256 cap) external onlyOwner notFinal {
+        if (lossBps > 1000 || feeBps > BPS) revert BadParam();
+        staking = s_; stakerLossBps = lossBps; stakerFeeBps = feeBps; stakerCap = cap;
+    }
+    /// @notice one-way: freezes every rule. Requires a live, unpaused exchange with nothing pending.
+    function finalize() external onlyOwner notFinal {
+        if (paused()) revert BadParam();
+        finalized = true; finalizedAt = uint64(block.timestamp); finalizedBlock = uint64(block.number);
+        emit Finalized(block.number);
+    }
+    /// @notice guardian-only, auto-expiring, limited: halts NEW opens for 72h. Nothing else.
+    function haltOpens() external {
+        if (msg.sender != guardian || haltsUsed >= MAX_HALTS) revert NotGuardian();
+        haltsUsed++; opensHaltedUntil = uint64(block.timestamp) + HALT_SECS;
+        emit OpensHalted(opensHaltedUntil, haltsUsed);
+    }
+    /// @notice permissionless: route accrued staker revenue (plus pool excess above max(stakerCap, reserved liability)) to staking.
+    ///         With zero stakers the amount returns to the pool (never lost). Never runs while wins are queued.
+    function sweepStakers() external nonReentrant {
+        address st = staking;
+        if (st == address(0) || queueHead < queue.length) return;
+        if (stakerCap != 0) { uint256 r = reservedLiability(); if (r < stakerCap) r = stakerCap; if (pool > r) { stakerAccrued += pool - r; pool = r; } }
+        uint256 amt = stakerAccrued; if (amt == 0) return;
+        stakerAccrued = 0;
+        if (IStakingSink(st).totalStaked() == 0) { pool += amt; emit StakersPaid(amt, true); return; }
+        collateral.safeTransfer(st, amt); IStakingSink(st).notifyReward(amt);
+        emit StakersPaid(amt, false);
+    }
+    function setGuardian(address g) external onlyOwner notFinal { guardian = g; emit GuardianSet(g); }
 }

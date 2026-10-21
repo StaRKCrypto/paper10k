@@ -1,0 +1,10 @@
+testMode: property
+testLimit: 50000
+seqLen: 60
+shrinkLimit: 2000
+deployer: "0x30000"
+sender: ["0x10000"]
+cryticArgs: ["--foundry-compile-all"]
+corpusDir: "echidna-corpus"
+maxTimeDelay: 15
+maxBlockDelay: 2

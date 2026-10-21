@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, stdStorage, StdStorage} from "forge-std/Test.sol";
 import {Paper10kExchange} from "../src/Paper10kExchange.sol";
 import {Paper10kX} from "../src/Paper10kX.sol";
 import {TestUSDC} from "../src/testnet/TestUSDC.sol";
@@ -24,6 +24,7 @@ contract MockOracle is IPriceOracle, ILiquidationOracle {
 }
 
 abstract contract Base is Test {
+    using stdStorage for StdStorage;
     Paper10kExchange ex; Paper10kX x; TestUSDC usdc; MockOracle orc;
     address owner = address(0xA11CE); address alice = address(0xA1); address bob = address(0xB0B); address keeper = address(0xCEE);
     uint32 constant BTC = 0;
@@ -44,8 +45,8 @@ abstract contract Base is Test {
         ex = new Paper10kExchange(owner, IERC20(address(usdc)), 6, x, orc, DELAY, defParams(), defOps());
         vm.startPrank(owner);
         x.setMinter(address(ex), true);
-        ex.proposeMarket(BTC, true, 10_000_000e6, 10_000_000e6);
-        vm.warp(block.timestamp + DELAY); ex.applyMarket(BTC);
+        ex.setMarket(BTC, true, 10_000_000e6, 10_000_000e6);
+        vm.warp(block.timestamp + DELAY); 
         ex.unpause();
         vm.stopPrank();
         _fund(alice, 10_000e6); _fund(bob, 10_000e6);
@@ -66,6 +67,8 @@ abstract contract Base is Test {
     /// via-IR note: cheatcode-adjacent `block.*` reads can be cached by the compiler inside one function; use real reads here
     function _adv(uint256 blocks, uint256 secs) internal { vm.roll(vm.getBlockNumber() + blocks); vm.warp(vm.getBlockTimestamp() + secs); }
     function _next() internal { vm.warp(block.timestamp + 5); vm.roll(block.number + 1); }
+    /// owner withdrawals no longer exist: tests that need a small pool shrink it directly (cash stays >= liabilities)
+    function _setPool(uint256 v) internal { stdstore.target(address(ex)).sig("pool()").checked_write(v); }
     function _solvent() internal view {
         assertGe(usdc.balanceOf(address(ex)), ex.totalFree() + ex.totalMargin() + ex.pool() + ex.insurance());
     }

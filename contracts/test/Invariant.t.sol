@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {_po, _ql} from "./Helpers.sol";
 import {Base, MockOracle} from "./Base.t.sol";
 import {Paper10kExchange} from "../src/Paper10kExchange.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
@@ -28,9 +29,9 @@ contract Handler is Base {
     }
     function mv(int256 bps) external { bps = bound(bps, -300, 300); uint256 p = orc.px(0); orc.set(0, uint256(int256(p) + int256(p) * bps / 10_000)); }
     function pass(uint256 s) external { vm.warp(block.timestamp + bound(s, 0, 20)); vm.roll(block.number + 1); orc.set(0, orc.px(0)); }
-    function _settled(uint256 id) internal { if (isOpen[id] && ex.positionOwner(id) == address(0)) { isOpen[id] = false; ghostMargin -= marginOf[id]; } }
+    function _settled(uint256 id) internal { if (isOpen[id] && _po(ex, id) == address(0)) { isOpen[id] = false; ghostMargin -= marginOf[id]; } }
     function cls(uint256 i) external {
-        if (ids.length == 0) return; uint256 id = ids[i % ids.length]; address o = ex.positionOwner(id);
+        if (ids.length == 0) return; uint256 id = ids[i % ids.length]; address o = _po(ex, id);
         vm.prank(o); try ex.close(id) { nClose++; } catch {} _settled(id);
     }
     function liq(uint256 i) external { if (ids.length == 0) return; uint256 id = ids[i % ids.length]; try ex.markLiquidatable(id) {} catch {} vm.roll(block.number + 2); vm.warp(block.timestamp + 2); orc.set(0, orc.px(0));
@@ -42,7 +43,7 @@ contract Handler is Base {
         } catch {} _settled(id); }
     /// owner of the position liquidates it himself: must earn nothing
     function selfLiq(uint256 i) external {
-        if (ids.length == 0) return; uint256 id = ids[i % ids.length]; address o = ex.positionOwner(id); if (o == address(0)) return;
+        if (ids.length == 0) return; uint256 id = ids[i % ids.length]; address o = _po(ex, id); if (o == address(0)) return;
         try ex.markLiquidatable(id) {} catch {} vm.roll(block.number + 2); vm.warp(block.timestamp + 2); orc.set(0, orc.px(0));
         uint256 f0 = ex.free(o);
         vm.prank(o); try ex.liquidate(id) { nLiq++; if (ex.free(o) != f0) badBounty = true; } catch {} _settled(id); }
@@ -60,14 +61,9 @@ contract Handler is Base {
         Paper10kExchange.Params memory p = defParams();
         p.maintBps = uint16(bound(s, 100, 5000)); p.winFeeBps = uint16(bound(s >> 8, 0, 1000)); p.maxProfitMult = uint16(bound(s >> 16, 1, 10_000));
         p.rateMultiplier = uint32(bound(s >> 24, 1, 1e6)); p.deadbandWad = uint64(bound(s >> 40, 0, 1e16)); p.insuranceBps = uint16(bound(s >> 56, 0, 5000));
-        vm.startPrank(owner); ex.proposeConfig(p, defOps()); vm.warp(block.timestamp + DELAY); try ex.applyConfig() { nCfg++; } catch {} vm.stopPrank();
+        vm.startPrank(owner); try ex.setConfig(p, defOps()) { nCfg++; } catch {} vm.stopPrank();
         vm.roll(block.number + 1); orc.set(0, orc.px(0));
         uint256 v = ex.paramsVersion(); if (v > maxVersionSeen) maxVersionSeen = v;
-    }
-    function ownerWd(uint256 a, bool ins) external {
-        a = bound(a, 1, 2_000e6);
-        vm.startPrank(owner); ex.proposeWithdraw(owner, a, ins); vm.warp(block.timestamp + DELAY); uint256 resB = ex.reservedLiability(); try ex.applyWithdraw() { nWd++; if (ex.pool() + ex.insurance() < resB) ownerBreach = true; } catch {} vm.stopPrank();
-        vm.roll(block.number + 1); orc.set(0, orc.px(0));
     }
     function liveIds() external view returns (uint256[] memory) { return ids; }
 }
@@ -84,7 +80,7 @@ contract InvariantTest is StdInvariant, Base {
         vm.prank(owner); // handler acts via pranks of users; give each user approvals (done in _fund)
         bytes4[] memory sel = new bytes4[](14);
         sel[0]=Handler.dep.selector; sel[1]=Handler.wd.selector; sel[2]=Handler.open.selector; sel[3]=Handler.mv.selector; sel[4]=Handler.pass.selector;
-        sel[5]=Handler.cls.selector; sel[6]=Handler.liq.selector; sel[7]=Handler.q.selector; sel[8]=Handler.cfg.selector; sel[9]=Handler.ownerWd.selector; sel[10]=Handler.mark.selector; sel[11]=Handler.nudge.selector; sel[12]=Handler.liqEarly.selector; sel[13]=Handler.selfLiq.selector;
+        sel[5]=Handler.cls.selector; sel[6]=Handler.liq.selector; sel[7]=Handler.q.selector; sel[8]=Handler.cfg.selector; sel[9]=Handler.q.selector; sel[10]=Handler.mark.selector; sel[11]=Handler.nudge.selector; sel[12]=Handler.liqEarly.selector; sel[13]=Handler.selfLiq.selector;
         targetSelector(FuzzSelector({addr: address(h), selectors: sel}));
         bytes4[] memory s2 = new bytes4[](1); s2[0] = Handler.fundIns.selector;
         targetSelector(FuzzSelector({addr: address(h), selectors: s2}));
@@ -99,7 +95,7 @@ contract InvariantTest is StdInvariant, Base {
     /// sum of margins of positions we know are open equals totalMargin
     function invariant_marginGhost() public view { assertEq(ex.totalMargin(), h.ghostMargin()); }
     function invariant_queueSum() public view {
-        uint256 s; for (uint256 i = ex.queueHead(); i < ex.queueLength() + ex.queueHead(); i++) { (, uint256 a) = ex.queue(i); s += a; }
+        uint256 s; for (uint256 i = ex.queueHead(); i < _ql(ex) + ex.queueHead(); i++) { (, uint256 a) = ex.queue(i); s += a; }
         assertEq(s, ex.queuedTotal());
     }
     function invariant_pxCap() public view { assertLe(x.totalSupply(), x.maxSupply()); }
@@ -116,7 +112,7 @@ contract InvariantTest is StdInvariant, Base {
     /// THE governance guarantee: no config change ever moves an already-open position's bust price
     function invariant_bustFrozenAtOpen() public view {
         uint256[] memory ids = h.liveIds();
-        for (uint256 i = 0; i < ids.length; i++) { if (ex.positionOwner(ids[i]) != address(0)) assertEq(ex.bustPriceOf(ids[i]), h.bustAtOpen(ids[i])); }
+        for (uint256 i = 0; i < ids.length; i++) { if (_po(ex, ids[i]) != address(0)) assertEq(ex.bustPriceOf(ids[i]), h.bustAtOpen(ids[i])); }
     }
     /// params version only ever grows; positions reference existing versions
     function invariant_versionMonotone() public view { assertGe(ex.paramsVersion(), h.maxVersionSeen()); }
@@ -127,7 +123,7 @@ contract InvariantTest is StdInvariant, Base {
     /// v4: marks only exist for open positions
     function invariant_marksOnlyForOpenPositions() public view {
         uint256[] memory ids = h.liveIds();
-        for (uint256 i = 0; i < ids.length; i++) { if (ex.positionOwner(ids[i]) == address(0)) { (uint32 b,) = ex.marks(ids[i]); assertEq(b, 0); } }
+        for (uint256 i = 0; i < ids.length; i++) { if (_po(ex, ids[i]) == address(0)) { (uint32 b,) = ex.marks(ids[i]); assertEq(b, 0); } }
     }
     /// v4: reserved liability equals the recomputed worst case (max side per market) from the open positions
     function invariant_reservedLiabilityMatches() public view {
@@ -141,7 +137,6 @@ contract InvariantTest is StdInvariant, Base {
         assertEq(ex.reservedLiability(), l > sh ? l : sh);
     }
     /// v4 F7: when owner withdrawals succeeded, house cash still covered the reserve at that time -> checked by Reserved(); here: cash never below reserve unless it was already below before (no owner-caused breach)
-    function invariant_ownerNeverCausedReserveBreach() public view { assertFalse(h.ownerBreach()); }
     /// v5: bounty never exceeds min(2% margin, cap) and self-liquidation never earns one
     function invariant_bountyBoundedAndNeverSelfPaid() public view { assertFalse(h.badBounty()); }
 }

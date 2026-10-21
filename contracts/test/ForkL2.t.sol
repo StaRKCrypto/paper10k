@@ -49,7 +49,7 @@ contract ForkL2 is Test {
         vm.startPrank(owner);
         orc.configure(0, clBtc, 2 days, BTC_ID, 60, 100, 50); orc.finalizeBootstrap();
         x.setMinter(address(ex), true);
-        ex.proposeMarket(0, true, 10_000_000e6, 10_000_000e6); vm.warp(vm.getBlockTimestamp() + 2 days); ex.applyMarket(0); ex.unpause();
+        ex.setMarket(0, true, 10_000_000e6, 10_000_000e6); vm.warp(vm.getBlockTimestamp() + 2 days);  ex.unpause();
         vm.stopPrank();
         deal(address(col), owner, 10_000e6); deal(address(col), alice, 1_000e6);
         vm.prank(owner); col.approve(address(ex), type(uint256).max); vm.prank(owner); ex.seedPool(10_000e6);

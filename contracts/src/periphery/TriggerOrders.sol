@@ -9,6 +9,8 @@ interface IP10KExchange {
         uint128 entry, uint64 openedAt, uint32 openedBlock);
     function oracle() external view returns (IPriceOracle);
     function close(uint256 id) external;
+    function requestClose(uint256 id) external;
+    function finalized() external view returns (bool);
     function isOperator(address user, address op) external view returns (bool);
 }
 
@@ -68,7 +70,8 @@ contract TriggerOrders {
             revert NotTriggered();
         }
         delete orders[id];
-        exchange.close(id);
+        // after finalize closes are two-step: this files the close request; a keeper fills it at the next unique Pyth price
+        if (exchange.finalized()) exchange.requestClose(id); else exchange.close(id);
         emit Executed(id, msg.sender, price, hit == 1);
     }
 }

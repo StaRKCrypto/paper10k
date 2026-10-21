@@ -6,7 +6,7 @@ solc = "0.8.26"
 evm_version = "cancun"
 optimizer = true
 via_ir = true
-optimizer_runs = 200
+optimizer_runs = 1
 remappings = ["@openzeppelin/=lib/openzeppelin-contracts/"]
 fs_permissions = []
 
