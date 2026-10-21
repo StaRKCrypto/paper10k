@@ -74,6 +74,11 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     PendingLimits public pendingLimits;
     bool public launched;
     mapping(address => uint256) public walletMargin;
+    /// @notice close-only operators (e.g. the TriggerOrders periphery for TP/SL). An operator can only call close() on the owner's
+    ///         positions; proceeds always go to the position owner; it can never open, withdraw or move funds.
+    mapping(address => mapping(address => bool)) public isOperator;
+    /// @notice liquidation count per trader (read by RektBadges for achievements; no cash value)
+    mapping(address => uint256) public rektCount;
     mapping(uint32 => uint256) public refPx;
     mapping(uint32 => uint64) public refAt;
     bool public emergencyMode;
@@ -142,6 +147,7 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     event EmergencyModeSet(bool on);
     event GuardianSet(address g);
 
+    event OperatorSet(address indexed user, address indexed op, bool on);
     event LimitsSet(); event LimitsProposed(uint64 at);
     error BadParam(); error NotListed(); error MarketClosed(); error Leverage(); error Margin(); error Cap();
     error PriceBad(); error Slippage(); error NotOwnerOfPosition(); error TooSoon(); error NotLiquidatable();
@@ -212,14 +218,14 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
     /// @notice voluntary close. Not in the same block as open and not before `minHold`. Past bust => it is a liquidation.
     function close(uint256 id) external nonReentrant whenNotPaused {
         Position memory p = positions[id];
-        if (p.owner != msg.sender) revert NotOwnerOfPosition();
+        if (p.owner != msg.sender && !isOperator[p.owner][msg.sender]) revert NotOwnerOfPosition();
         if (block.timestamp < p.openedAt + ops.minHold || block.number <= p.openedBlock) revert TooSoon();
         Params memory pr = paramsHistory[p.pv];
         uint256 price = _price(p.market);
         // v4: a hard bust on voluntary close needs the multi-source liquidation price to agree. If it is unavailable (F8) or does not agree,
         // the close proceeds at the primary price; a position past maintenance then simply realises its (capped) loss.
         (bool lok, uint256 lp) = _liqPrice(p);
-        if (lok && _busted(p, pr, lp)) { _liquidate(id, p, pr, lp, msg.sender); return; }
+        if (lok && _busted(p, pr, lp)) { _liquidate(id, p, pr, lp, p.owner); return; } // owner as keeper: no bounty, also via an operator
         _removePosition(id, p);
         (bool win, uint256 amt) = _pnl(p, pr, price);
         totalMargin -= p.margin;
@@ -295,8 +301,11 @@ contract Paper10kExchange is Ownable2Step, Pausable, ReentrancyGuard {
         if (bounty > 0) { free[keeper] += bounty; totalFree += bounty; emit BountyPaid(id, keeper, bounty); }
         _inflow(p.margin - bounty, pr.insuranceBps);
         uint256 minted = px.mint(p.owner, uint256(p.margin) * mintScale * pr.mintPerCollateral);
+        rektCount[p.owner]++;
         emit Liquidated(id, p.owner, keeper, price, p.margin, minted);
     }
+
+    function setOperator(address op, bool on) external { isOperator[msg.sender][op] = on; emit OperatorSet(msg.sender, op, on); }
 
     function _removePosition(uint256 id, Position memory p) internal {
         Market storage m = markets[p.market];
