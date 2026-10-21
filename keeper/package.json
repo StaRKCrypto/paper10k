@@ -4,13 +4,19 @@
   "private": true,
   "description": "Liquidation keeper for the PAPER10K exchange (testnet/local). No telemetry; key from env only.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/cli.mjs",
     "dry-run": "node src/cli.mjs --dry-run",
-    "test": "node --test test/decide.test.mjs",
-    "e2e": "node test/e2e.mjs"
+    "test": "node --test test/decide.test.mjs test/seasons.test.mjs",
+    "e2e": "node test/e2e.mjs",
+    "index": "node src/indexer.mjs",
+    "triggers": "node src/triggers.mjs"
   },
-  "dependencies": { "viem": "^2.21.0" },
+  "dependencies": {
+    "viem": "^2.21.0"
+  },
   "license": "MIT"
 }
