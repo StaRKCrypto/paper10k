@@ -40,8 +40,8 @@ Expect queue formation on any 0.5–1% BTC move if OI is near cap. Start tiny; r
 ## 5. Owner/admin model
 - Owner = **multisig (≥3/5)**. The exchange has its own immutable timelock `configDelay` (deploy script: ≥ 1 day required on mainnet; use **2 days**), so a hostile or compromised owner cannot act instantly. Owner also controls `HyperCoreOracle` (guards) and `PythReference`: put those behind the same multisig; consider a timelock contract in front of them (they are not timelocked by themselves).
 - **Open positions are protected:** parameters are versioned; a position keeps the version it opened under (maintenance margin, fees, haircut, deadband, cap, mint rate). New values only affect positions opened after `applyConfig`.
-- Timelocked: `proposeConfig/applyConfig/cancelConfig`, `proposeMarket/applyMarket`, `proposeOracle/applyOracle`, `proposeWithdraw/applyWithdraw` (pool or insurance surplus only; blocked while wins are queued; can never touch free balances or margins). Instant: `pause`, `closeMarket` (owner or guardian), `unpause`, `setEmergencyMode`, `setGuardian`, `seedPool`, `fundInsurance`.
-- Guardian = hot key that can only `pause()` / `closeMarket()`.
+- v9: NO timelock and NO owner withdrawal exist any more. Pre-finalize only (owner): `setConfig`, `setLimits`, `setMarket`, `setOracle`, `setStaking`, `setGuardian`, `pause/unpause`. `finalize()` is one-way; afterwards every one of those reverts `Final()`, then `renounceOwnership()`. Nobody can withdraw house capital (pool/insurance) ever; it only pays winners/queue and stakers.
+- Guardian (post-finalize) = can only `haltOpens()` (new opens only, 72 h, max 3 times ever). It can never pause closes, fills of close requests, liquidations, withdrawals, staking.
 - Emergency: `pause()` → `setEmergencyMode(true)` → users `emergencyCancel(id)` get margin back at entry (no PnL). `withdraw` of free balance always works.
 
 ## 6. Exact deploy steps (run yourself, from a clean machine, hardware wallet). Nothing below has been run on mainnet.
@@ -94,11 +94,11 @@ Audits closed ✅ · legal opinion ✅ · oracle verified on fork ✅ · monitor
 Paper10kExchange creation costs ~4.62M gas; HyperEVM small blocks are capped at 3,000,000. The deployer address must enable **big blocks** (30M limit) via the HyperCore `usingBigBlocks` user action before deploying (or the Exchange must be shrunk), then switch back. Rehearse this on testnet 998 with a funded throwaway key before any mainnet step. Also measure mainnet BTC/ETH mid-vs-oraclePx divergence: with both-agree liquidation, divergence delays liquidations at 10000x.
 
 ## v7 — launch risk limits (Base target, branch oracle-l2-adapters)
-Before the first `unpause()`, the owner calls `setLimitsPreLaunch((minNotional, maxNotional, maxWalletMargin, maxLiabPoolBps, maxJumpBps, jumpWindow))`;
+Before the first `unpause()`, the owner calls `setLimitsPreLaunch((minNotional, maxNotional, maxWalletMargin, maxLiabPoolBps, maxJumpBps, jumpWindow, maxPayoutPoolBps))`;
 after the first unpause it is `proposeLimits` → wait `configDelay` → `applyLimits`. Conservative launch defaults (6-dec USDC):
-`(10_000e6, 1_000_000e6, 100e6, 10_000, 50, 60)` = $10k min notional (Papertrade's value), $1M max notional (Papertrade: $10M),
+`(10_000e6, 10_000e6, 100e6, 10_000, 50, 60, 100)` = launch rule: every position is exactly $1 margin x 10000x = $10,000 notional (min = max notional, min = max margin = 1 USDC in Params),
 $100 total open margin per wallet, per-side worst-case liability ≤ 100 % of pool+insurance, opens blocked while price is >0.5 % from a
-reference re-anchored at most every 60 s. Closes and liquidations are never blocked by these limits.
+reference re-anchored at most every 60 s, max size: one position's worst-case payout (1 USDC x 100 profit cap = 100 USDC) <= 1% of pool+insurance, so trading needs pool+insurance >= 10,000 USDC. Closes and liquidations are never blocked by these limits.
 
 ## v8 — FINAL PRE-MAINNET CHECKLIST (Base 8453, branch base-features)
 Do not tick a box on someone's word: each item needs an artefact (tx hash, report, file).
@@ -117,7 +117,7 @@ Do not tick a box on someone's word: each item needs an artefact (tx hash, repor
 - [ ] Owner = Safe ≥3/5; guardian = separate key; `CONFIG_DELAY` ≥ 2 days.
 - [ ] Deploy order: Oracle → PAPER10KX → Exchange (real USDC `0x8335…2913`, 6 dp) → `setMinter(exchange, lock=true)` → TriggerOrders(exchange) → RektBadges(exchange). Verify all on Basescan.
 - [ ] `forge build --sizes`: Exchange runtime < 24,576 B (currently 23,159 B).
-- [ ] Before first `unpause()`: `setLimitsPreLaunch((10_000e6, 1_000_000e6, 100e6, 10_000, 50, 60))`, markets proposed with tiny OI caps, TVL cap small, pool + insurance seeded.
+- [ ] Before first `unpause()`: `setLimitsPreLaunch((10_000e6, 10_000e6, 100e6, 10_000, 50, 60, 100))` (pool+insurance must be ≥ 10,000 USDC or every open reverts PoolTooSmall), markets proposed with tiny OI caps, TVL cap small, pool + insurance seeded.
 - [ ] Rehearse the entire sequence on Base Sepolia (84532) and a Base mainnet fork first; record every tx hash.
 
 **Frontend placeholders**
@@ -130,3 +130,20 @@ Do not tick a box on someone's word: each item needs an artefact (tx hash, repor
 - [ ] ≥2 liquidation keepers + 1 TP/SL trigger keeper (`keeper/src/triggers.mjs`) on dedicated gas-only hot keys, `MAX_GAS_PRICE_GWEI` set, alerting on errors and on stale oracle.
 - [ ] Monitoring: pool/insurance/queue, oracle freshness, circuit-breaker trips, pause state; incident runbook rehearsed (pause → closeMarket → emergencyMode).
 - [ ] Rollback plan for the site (previous Pages commit hash recorded) and for contracts (`proposeOracle`, `closeMarket`, pause).
+
+## v9 — price sources + two-step orders (SEC-3) — read before finalize
+
+**Chosen setup (Base 8453), all verified live over RPC on 2026-10-21 (Asia/Calcutta evening):**
+
+| Role | Source | Base address / id | Why |
+|---|---|---|---|
+| Fill price (open/close) | **Pyth Core**, `parsePriceFeedUpdatesUnique` | `0x8250f4aF4B972684F7b336503E2D6dFeDeB1487a`; BTC `0xe62d…5b43`, ETH `0xff61…0ace`, SOL `0xef0d…b56d` | already a median of many first-party publishers (Binance, OKX, Bybit, Jane St, …); pull model; the *unique first update after the request* removes every price choice |
+| Sanity bound on fills + 2nd liquidation vote | **Chainlink Data Feeds** (push) | BTC/USD `0x64c9…848F`, ETH/USD `0x7104…Bb70`, SOL/USD `0x9750…462D`; sequencer feed `0xBCF8…6433` | independent network, free to read; fills revert if Pyth is > `maxDevBps` (100) from it |
+| Optional 3rd vote | any AggregatorV3 push feed via `setThird` (RedStone Push / API3 / Chronicle) | env `THIRD_BTC/ETH/SOL` (placeholders: not verified on Base here) | joins the "all must agree" set for liquidations and the bound for fills |
+| Off-chain venues | Binance, Coinbase, Hyperliquid, Lighter public APIs (no keys) | keeper `src/refprice.mjs`, app `src/chain/refprice.js` | **secondary only**: never on-chain. Keeper skips + alerts before marking a liquidation if the oracle is > 50 bps from the venue median; filler alerts only; app shows the venues and the divergence |
+
+Rejected: keeper-signed off-chain median on-chain (a signer key is a rug/censor vector in an immutable system); Stork (Base pushes only USN feeds; pull needs a Stork API key); Chainlink Data Streams (paid, permissioned verifier); Chronicle (reads are whitelisted).
+
+**SEC-3 (stale-price arbitrage) fix:** after `finalize()` the instant `open()`/`close()` revert `Final()`. Trading is `requestOpen` (margin locked at once) / `requestClose` (one pending per position, not cancellable) → anyone calls `fill(rid, pythUpdateData)` paying the Pyth fee; the oracle accepts only the first Pyth update published in `[request.ts + 1, request.ts + 11]`. Failed open fills (slippage, caps, pool too small) refund the margin in the same tx. `cancelRequest` only after 1 day (oracle outage). Exploit + fix tests: `test/TwoStep.t.sol`.
+
+**Gates added:** run `keeper/src/filler.mjs` (needs `PYTH_API_KEY`: Hermes returns 401 without one since 2026-08-26 — placeholder; header name to confirm with Pyth) and at least one independent filler before finalize; re-check every Chainlink heartbeat on data.chain.link (script uses 3,900 s BTC/ETH, 86,700 s SOL from measured round ages); finalize only after the security scan and `forge test --match-contract ForkL2 --fork-url <base rpc>` are green.
