@@ -110,3 +110,12 @@ select{background:#070c14;color:var(--tx);border:1px solid var(--bd);border-radi
 @media(max-width:600px){.lpgrid{grid-template-columns:repeat(2,minmax(0,1fr))}.lp{padding:8px}}
 .tw{overflow-x:auto;margin-top:8px}.tw table{margin:0}#lpOi{margin-top:0}.lpright{position:relative;z-index:1}
 [hidden]{display:none!important}
+/* Rules table: wrap on all screens, stack label/value on narrow screens */
+.rulestbl{width:100%;table-layout:fixed}
+.rulestbl th,.rulestbl td{white-space:normal;overflow-wrap:anywhere;word-break:break-word;text-align:left;vertical-align:top}
+@media (max-width:640px){
+  .rulestbl,.rulestbl tbody,.rulestbl tr,.rulestbl th,.rulestbl td{display:block;width:100%}
+  .rulestbl tr{padding:8px 0;border-bottom:1px solid rgba(255,255,255,.08)}
+  .rulestbl th{opacity:.7;font-size:.85em;padding:0 0 2px}
+  .rulestbl td{padding:0}
+}

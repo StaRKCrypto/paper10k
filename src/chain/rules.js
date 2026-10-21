@@ -66,7 +66,7 @@ export function rulesHtml(R, { fmt, explorer, sym = 'USDC' }) {
     ['PAPER10KX on liquidation', `${R.mintRateNow != null ? R.mintRateNow : R.mintPerCollateral} per 1 ${sym} margin now (base ${R.mintPerCollateral}; halves per doubling of the pool above ${f(R.mintDecayPool)})`],
     ['Stakers earn', `${pct(R.stakerLossBps)} of every trader loss + ${pct(R.stakerFeeBps)} of win fees${Number(R.stakerCap) ? ` + pool above ${f(R.stakerCap)}` : ''}; unstake cooldown ${R.cooldown ?? 0}s`],
   ];
-  h += `<table class="tbl">${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table></div>`;
+  h += `<table class="tbl rulestbl">${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table></div>`;
   const faq = [
     ['Can anyone change these rules?', 'No. Every setter only works before finalize(); finalize is one-way and the owner key is then renounced (owner == 0x0 above). There is no timelock because there is nothing left to schedule, and no proxy: the code can never be upgraded.'],
     ['Can the team withdraw the pool or my funds?', 'No. There is no owner withdrawal function at all. The pool only pays winners, queued wins and stakers. Your free balance is withdrawable any time.'],
