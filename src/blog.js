@@ -51,9 +51,9 @@ export function blogHtml() {
   <p><b>Without</b> two-step orders, any oracle lag of 1 s or more made latency arbitrage strongly profitable for every parameter set. <b>With</b> them, <b>2× is the only cap where every strategy loses in all three oracle scenarios and both delay models.</b> From 3× up, the arb and the adversarial whale turn positive once the oracle is wide or stressed.</p></section>
 
   <section id="b-pool"><h2>Result 2: 180-day pool simulations</h2>
-  <figure><img src="assets/blog/pool_equity_seed10.png" alt="Pool equity over 180 days from a $10 seed: M=2 grows steadily in every scenario, M=3/5/10 crash or flatline in some" loading="lazy"><figcaption>$10 seed. Left: 2× cap, every scenario. Right: 3×/5×/10×, where several paths are drained to dust and freeze.</figcaption></figure>
-  <figure><img src="assets/blog/pool_equity_seed100.png" alt="Pool equity over 180 days from a $100 seed" loading="lazy"><figcaption>$100 seed, same story.</figcaption></figure>
-  <figure class="half"><img src="assets/blog/pool_equity_sybil_lowact.png" alt="Pool equity with 20 Sybil arbitrage wallets and with low activity" loading="lazy"><figcaption>20 Sybil arb wallets under stress, and the low-activity run.</figcaption></figure>
+  <figure><img src="assets/blog/pool_equity_seed10.png" alt="Pool equity over 180 days from a $10 seed: M=2 grows steadily in every scenario, M=3/5/10 crash or flatline in some"><figcaption>$10 seed. Left: 2× cap, every scenario. Right: 3×/5×/10×, where several paths are drained to dust and freeze.</figcaption></figure>
+  <figure><img src="assets/blog/pool_equity_seed100.png" alt="Pool equity over 180 days from a $100 seed"><figcaption>$100 seed, same story.</figcaption></figure>
+  <figure class="half"><img src="assets/blog/pool_equity_sybil_lowact.png" alt="Pool equity with 20 Sybil arbitrage wallets and with low activity"><figcaption>20 Sybil arb wallets under stress, and the low-activity run.</figcaption></figure>
   <ul><li><b>2× cap: 0% ruin and 0 bad debt</b> across every scenario, delay model, seed, payout cap and sensitivity variant. Worst drawdown 8–18% with the 1% cap. With 20 Sybil arb wallets under stress the pool dipped to 47% of its seed in 1 of 2 runs, then recovered.</li>
   <li><b>5× and 10×</b> drained the pool to dust under the wide and stress oracles. <b>3×</b> produced queued wins (bad debt) under the wide oracle.</li>
   <li>Trader win rates at 2×: farmers 20%, whales 11%, adversarial whale 18.5%, arb 33%. About 5% of opens were blocked, almost all by the breaker.</li>

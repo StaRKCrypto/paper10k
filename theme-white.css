@@ -148,7 +148,7 @@ body[data-view=blog] #landing,body[data-view=blog] #terminal,body[data-view=blog
 .blog h3{font-size:17px;margin:22px 0 6px;letter-spacing:-.01em}
 .blog section{scroll-margin-top:80px}
 .blog .lede{font-size:19px;color:#3a3a36}.blog .meta{font:500 12.5px var(--mono);color:var(--mu)}
-.bhero{display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:24px;align-items:center;padding-bottom:18px;border-bottom:1px solid var(--bd)}
+.bhero{display:grid;grid-template-columns:minmax(0,1fr) 180px;gap:24px;align-items:center;padding-bottom:18px;border-bottom:1px solid var(--bd)}
 .bcrew{display:flex;gap:4px;justify-content:center;align-items:flex-end}.bcrew .ch{width:72px}.bcrew .ch figcaption{font:700 9.5px var(--mono);color:var(--mu)}
 .btoc{position:sticky;top:60px;z-index:5;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:12px 0;background:linear-gradient(var(--bg) 80%,transparent);margin-bottom:6px}
 .btoc a{flex:0 0 auto;text-decoration:none;font:600 12.5px var(--sans);color:var(--mu);border:1px solid var(--bd);background:#fff;border-radius:999px;padding:5px 12px}.btoc a:hover{color:var(--tx);border-color:var(--bd2)}
