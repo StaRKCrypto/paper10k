@@ -99,3 +99,34 @@ after the first unpause it is `proposeLimits` → wait `configDelay` → `applyL
 `(10_000e6, 1_000_000e6, 100e6, 10_000, 50, 60)` = $10k min notional (Papertrade's value), $1M max notional (Papertrade: $10M),
 $100 total open margin per wallet, per-side worst-case liability ≤ 100 % of pool+insurance, opens blocked while price is >0.5 % from a
 reference re-anchored at most every 60 s. Closes and liquidations are never blocked by these limits.
+
+## v8 — FINAL PRE-MAINNET CHECKLIST (Base 8453, branch base-features)
+Do not tick a box on someone's word: each item needs an artefact (tx hash, report, file).
+
+**Legal & audit**
+- [ ] Written legal opinion for offering 10000x synthetic derivatives in your target jurisdictions + geo-blocking decision; terms, risk disclosures, age gate.
+- [ ] ≥2 independent audits of `contracts/src/` incl. `ChainlinkPythOracle`, `periphery/TriggerOrders`, `periphery/RektBadges`; all findings closed. Slither/Aderyn clean or triaged.
+- [ ] Reown AppKit is under the **Reown Community License** (`vendor/REOWN-APPKIT-LICENSE.md`): review it, or set `WC_PROJECT_ID=''` to fall back to the MIT/Apache light path.
+
+**Oracle (the #1 risk at 10000x)**
+- [ ] Pyth API key obtained (Hermes requires one since 2026-08-26); keeper/frontend post `updatePriceFeeds` in the same tx/bundle as trades, marks, liquidations; update cost measured.
+- [ ] Chainlink BTC/USD, ETH/USD and L2 sequencer feed addresses re-read from Chainlink's directory on deploy day and verified on-chain (`description()`, `decimals()`, fresh `latestRoundData`).
+- [ ] `configure(...)` ages/deviation tuned from real data; `finalizeBootstrap()` called BEFORE `unpause()`.
+
+**Deploy (multisig owner, never a hot key)**
+- [ ] Owner = Safe ≥3/5; guardian = separate key; `CONFIG_DELAY` ≥ 2 days.
+- [ ] Deploy order: Oracle → PAPER10KX → Exchange (real USDC `0x8335…2913`, 6 dp) → `setMinter(exchange, lock=true)` → TriggerOrders(exchange) → RektBadges(exchange). Verify all on Basescan.
+- [ ] `forge build --sizes`: Exchange runtime < 24,576 B (currently 23,159 B).
+- [ ] Before first `unpause()`: `setLimitsPreLaunch((10_000e6, 1_000_000e6, 100e6, 10_000, 50, 60))`, markets proposed with tiny OI caps, TVL cap small, pool + insurance seeded.
+- [ ] Rehearse the entire sequence on Base Sepolia (84532) and a Base mainnet fork first; record every tx hash.
+
+**Frontend placeholders**
+- [ ] `src/chain/config.js`: `MAINNET_ENABLED=true` only after all of the above; `WC_PROJECT_ID`; `PAYMASTER_URLS[8453]` (proxy or domain-restricted key, allow-list only exchange/collateral/trigger/badges contracts, per-user spend cap); `APP_URL`; optional `ENS_RPC`.
+- [ ] `deployments.json["8453"] = {exchange, collateral, px, oracle, triggers, badges, block}`.
+- [ ] Farcaster: custom domain, signed `.well-known/farcaster.json` at the domain root, `YOUR_DOMAIN` in `index.html` `fc:miniapp`, `icon.png` + `og.png` assets.
+- [ ] Seasons: dates in `keeper/seasons.config.json`; indexer job publishing `seasons.json`; no prizes announced without legal sign-off (PAPER10KX/badges have no cash value).
+
+**Operations**
+- [ ] ≥2 liquidation keepers + 1 TP/SL trigger keeper (`keeper/src/triggers.mjs`) on dedicated gas-only hot keys, `MAX_GAS_PRICE_GWEI` set, alerting on errors and on stale oracle.
+- [ ] Monitoring: pool/insurance/queue, oracle freshness, circuit-breaker trips, pause state; incident runbook rehearsed (pause → closeMarket → emergencyMode).
+- [ ] Rollback plan for the site (previous Pages commit hash recorded) and for contracts (`proposeOracle`, `closeMarket`, pause).
