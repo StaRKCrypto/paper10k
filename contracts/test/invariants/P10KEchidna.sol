@@ -17,6 +17,10 @@ contract EOracle is IPriceOracle, ILiquidationOracle {
     function setLiq(uint32 m, uint256 p) external { liq[m] = p; }
     function getPrice(uint32 m) external view returns (uint256, uint64) { return (px[m], uint64(block.timestamp)); }
     function getLiquidationPrice(uint32 m, bool) external view returns (uint256, uint64) { return (liq[m], uint64(block.timestamp)); }
+    /// two-step fill price: mock ignores data, but enforces the requested publish window against block time
+    function fillPrice(uint32 m, bytes[] calldata, uint64 minTs, uint64 maxTs) external payable returns (uint256) {
+        require(block.timestamp >= minTs && block.timestamp <= maxTs + 30, "win"); return px[m];
+    }
 }
 
 contract Actor {
@@ -39,7 +43,8 @@ contract P10KEchidna {
     Paper10kExchange public ex; Paper10kX public x; TestUSDC public usdc; EOracle public orc;
     Actor[3] actors; uint256[] ids;
     uint256 constant P0 = 100_000e18; uint64 constant DELAY = 5 minutes;
-    bool badOwed; bool badLimits; bool badLiq; bool badReserve;
+    uint256[] rids; mapping(uint256 => bool) done; uint256 pendingOpenMargin;
+    bool badReq; bool badOwed; bool badLimits; bool badLiq; bool badReserve;
 
     constructor() {
         hevm.warp(1_000_000); hevm.roll(100);
@@ -122,7 +127,50 @@ contract P10KEchidna {
         if (ok || usdc.balanceOf(address(this)) > b0) badReserve = true;
     }
 
+    // ------------------------------------------------------------------ two-step orders
+    function requestOpen(uint256 i, bool isLong, uint256 m, uint256 lev, bool tight) external {
+        Actor ac = _a(i); m = 1e6 + m % 1_500e6; lev = 1 + lev % 12_000;
+        uint256 w = tight ? orc.px(0) : (isLong ? type(uint128).max : 0);
+        uint256 f0 = ex.free(address(ac));
+        (bool ok, bytes memory r) = ac.call(abi.encodeCall(ex.requestOpen, (0, isLong, m, uint32(lev), w)));
+        if (!ok) return;
+        if (ex.free(address(ac)) + m != f0) badReq = true; // margin must be locked exactly
+        rids.push(abi.decode(r, (uint256))); pendingOpenMargin += m;
+    }
+    function requestClose(uint256 k) external {
+        if (ids.length == 0) return; uint256 id = ids[k % ids.length]; address o = _po(ex, id); if (o == address(0)) return;
+        uint256 n0 = ex.nextReq();
+        (bool ok,) = Actor(o).call(abi.encodeCall(ex.requestClose, (id)));
+        if (ok) rids.push(n0);
+    }
+    function _rid(uint256 k) internal view returns (uint256) { return rids.length == 0 ? 0 : rids[k % rids.length]; }
+    function fill(uint256 k, uint256 dt) external {
+        uint256 rid = _rid(k); if (rid == 0) return;
+        (address tr, uint64 ts,,,, uint128 m,, uint256 pid) = ex.reqs(rid);
+        hevm.warp(block.timestamp + dt % 15); hevm.roll(block.number + 1);
+        uint256 tm0 = ex.totalMargin(); uint256 n0 = ex.nextPositionId();
+        try ex.fill(rid, new bytes[](0)) {
+            if (ts == 0 || done[rid]) badReq = true; // never fill an empty / consumed request
+            done[rid] = true;
+            if (pid == 0) {
+                pendingOpenMargin -= m;
+                if (ex.nextPositionId() > n0) { ids.push(n0); if (_po(ex, n0) != tr) badReq = true; }
+                else if (ex.totalMargin() + m != tm0) badReq = true; // failed open => full refund
+            }
+        } catch {}
+    }
+    function cancel(uint256 k, bool late) external {
+        uint256 rid = _rid(k); if (rid == 0) return;
+        (, uint64 ts,,,, uint128 m,, uint256 pid) = ex.reqs(rid);
+        if (late) hevm.warp(block.timestamp + 1 days + 1);
+        try ex.cancelRequest(rid) {
+            if (ts == 0 || block.timestamp <= ts + 1 days) badReq = true;
+            done[rid] = true; if (pid == 0) pendingOpenMargin -= m;
+        } catch {}
+    }
+
     // ------------------------------------------------------------------ properties
+    function echidna_requests_sound() external view returns (bool) { return !badReq && ex.totalMargin() >= pendingOpenMargin; }
     function echidna_solvency() external view returns (bool) {
         return usdc.balanceOf(address(ex)) >= ex.totalFree() + ex.totalMargin() + ex.pool() + ex.insurance();
     }
