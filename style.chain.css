@@ -23,3 +23,6 @@
 
 @media(max-width:640px){#chainbar .muted{display:none}#chainpanel{padding:8px}}
 body[data-mode=chain] #terminal{display:none}
+#chainpanel .ctabs{margin:12px 0}#chainpanel .tblwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}#chainpanel .tbl tr.me{background:#13202a}
+#chainpanel .wcbox .chips a{display:inline-block;padding:4px 8px;text-decoration:none}#chainpanel button[disabled]{opacity:.45;cursor:not-allowed}
+#chainpanel details summary{cursor:pointer}@media(max-width:640px){#chainpanel .tbl{font-size:11px}#chainpanel .tbl th,#chainpanel .tbl td{padding:4px 5px}#chainpanel .ctabs button{flex:1}}
