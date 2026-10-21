@@ -10,10 +10,11 @@
   "scripts": {
     "start": "node src/cli.mjs",
     "dry-run": "node src/cli.mjs --dry-run",
-    "test": "node --test test/decide.test.mjs test/seasons.test.mjs",
+    "test": "node --test test/decide.test.mjs test/seasons.test.mjs test/refprice.test.mjs",
     "e2e": "node test/e2e.mjs",
     "index": "node src/indexer.mjs",
-    "triggers": "node src/triggers.mjs"
+    "triggers": "node src/triggers.mjs",
+    "filler": "node src/filler.mjs"
   },
   "dependencies": {
     "viem": "^2.21.0"

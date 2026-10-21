@@ -2,6 +2,7 @@ import { createPublicClient, createWalletClient, http, defineChain } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts';
 import { exchangeAbi, oracleAbi } from './abi.mjs';
 import { decide, isBusted } from './decide.mjs';
+import { fetchRefs, judge, MARKET_SYMBOL } from './refprice.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const isRevert = (e) => /revert|ContractFunctionRevertedError|execution reverted|MarkNotReady|NotLiquidatable|PriceBad/i.test(e?.name + ' ' + (e?.shortMessage ?? e?.message ?? ''));
@@ -91,7 +92,17 @@ export async function createKeeper(cfg, log) {
         if (account && p[0].toLowerCase() === account.address.toLowerCase()) { log.warn('skip_own_position', { id }); continue; }
         if (bounty < cfg.minExpectedBounty) { log.info('skip_low_bounty', { id, bounty, min: cfg.minExpectedBounty }); continue; }
         if (await sendTx('liquidate', id, { ...ctx, expectedBounty: bounty })) stats.liquidate++;
-      } else if (action === 'mark') { if (await sendTx('markLiquidatable', id, ctx)) stats.mark++; }
+      } else if (action === 'mark') {
+        // secondary off-chain check (never on-chain): skip + alert if the oracle disagrees with Binance/Coinbase/Hyperliquid/Lighter
+        if (cfg.refCheck) {
+          const sym = MARKET_SYMBOL[Number(market)];
+          const q = sym ? await fetchRefs(sym) : {};
+          const v = judge(Number(lp) / 1e18, q, { maxBps: cfg.maxRefDivBps, minSources: 2 });
+          if (v.verdict === 'diverged') { log.error('ALERT_oracle_diverged_skip_mark', { id, ...ctx, ...v, quotes: q }); stats.skipDiverged = (stats.skipDiverged ?? 0) + 1; continue; }
+          if (v.verdict === 'unknown') log.warn('ref_prices_unavailable', { id, sources: v.sources });
+        }
+        if (await sendTx('markLiquidatable', id, ctx)) stats.mark++;
+      }
       else if (action === 'clear') { if (await sendTx('clearMark', id, ctx)) stats.clear++; }
     }
     return stats;

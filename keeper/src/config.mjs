@@ -15,6 +15,8 @@ export function loadConfig(env = process.env, argv = process.argv.slice(2)) {
     safetySecs: Number(env.SAFETY_SECS ?? 20),
     minExpectedBounty: BigInt(env.MIN_EXPECTED_BOUNTY ?? '0'), // collateral base units; skip liquidations paying less
     receiptTimeoutMs: Number(env.RECEIPT_TIMEOUT_MS ?? 60_000),
+    refCheck: env.REF_CHECK !== '0',                          // off-chain venue median check before marking (default on)
+    maxRefDivBps: Number(env.MAX_REF_DIV_BPS ?? 50),          // skip+alert above this divergence from the venue median
     logLevel: env.LOG_LEVEL ?? 'info',
     once: flag('--once'),
     dryRun: flag('--dry-run') || env.DRY_RUN === '1',
