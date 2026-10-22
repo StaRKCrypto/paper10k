@@ -150,7 +150,7 @@ function render() {
   if (tab === 'rules') { h += rulesHtml(c && d ? rules : null, { fmt: (v) => fmtUnits(v), explorer: c?.explorer, sym: sym() }) + `</div>`; return finish(root, h, keep); }
   if (tab === 'badges') { h += badgesHtml(d) + `</div>`; return finish(root, h, keep); }
   // --- balances / pool
-  h += `<div class="ccard"><h3>Protocol (${c ? esc(c.short) : '—'})</h3>`;
+  h += `<div class="ccard"><h3>${c ? `Protocol · ${esc(c.short)}` : 'Protocol'}</h3>`;
   if (!c) h += `<p class="muted">Connect a wallet and pick a test network.</p>`;
   else if (!d) h += `<p class="muted">PAPER10K isn’t live on ${esc(c.name)} yet. Try the simulator, or read the Rules and Blog meanwhile.</p>`;
   else if (!data) h += `<p class="muted">loading…</p>`;
@@ -196,7 +196,7 @@ function render() {
       <td class="chips"><button class="ghost sm" data-act="share" data-how="native" data-id="${r.id}">Share</button><button class="ghost sm" data-act="share" data-how="farcaster" data-id="${r.id}">Farcaster</button><button class="ghost sm" data-act="share" data-how="x" data-id="${r.id}">X</button><button class="ghost sm" data-act="share" data-how="png" data-id="${r.id}">PNG</button></td></tr>`;
     h += `</table></div></div>`;
   }
-  h += `<p class="fine ctrust">No trackers · no analytics · reads go straight to the public RPC of the selected test network. Prices on test networks are pushed by a signed-price relayer (<code>tools/price-relayer.mjs</code>); if no relayer is running, prices go stale and trading reverts by design.${MAINNET_ENABLED ? '' : ' Mainnet is disabled in this build.'}</p>`;
+  h += `<p class="fine ctrust">No trackers · no analytics · reads go straight to the public RPC of the selected network. If prices go stale, trading pauses safely until fresh prices arrive.</p>`;
   finish(root, h, keep);
 }
 
