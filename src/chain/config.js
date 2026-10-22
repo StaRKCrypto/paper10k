@@ -4,13 +4,13 @@
 export const MAINNET_ENABLED = false;
 
 // Free WalletConnect Cloud projectId (https://cloud.reown.com). Empty => WalletConnect button explains how to enable.
-export const WC_PROJECT_ID = ''; // PLACEHOLDER (owner): Reown/WalletConnect Cloud projectId. Needed for the AppKit modal and WalletConnect.
+export const WC_PROJECT_ID = '922fc2559b86921e61c91471341ac269'; // Reown/WalletConnect Cloud projectId (public)
 
 // PLACEHOLDER (owner): ERC-7677 paymaster service URLs per chain (e.g. Coinbase Developer Platform paymaster on Base). Empty = users pay gas.
 // The URL usually embeds an API key: use a proxy you control or a key restricted to your domain + the exchange/collateral/trigger contracts.
 export const PAYMASTER_URLS = { 8453: '', 84532: '' };
 // PLACEHOLDER (owner): public site URL (Farcaster mini app + share links) and optional mainnet RPC used only for ENS/Basename lookups.
-export const APP_URL = '';
+export const APP_URL = 'https://starkcrypto.github.io/paper10k/';
 export const ENS_RPC = ''; // '' => viem's default public mainnet RPC
 // Off-chain seasons/leaderboard file written by keeper/src/indexer.mjs and published next to index.html.
 export const SEASONS_URL = 'seasons.json';

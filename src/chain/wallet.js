@@ -73,7 +73,7 @@ export async function openAppKit() {
   if (!WC_PROJECT_ID) throw new Error('WalletConnect isn\u2019t available here yet. Please use a browser wallet.');
   const AK = await loadAppKit();
   if (!kit) {
-    kit = AK.init({ projectId: WC_PROJECT_ID, mainnet: MAINNET_ENABLED, appUrl: APP_URL || location.origin, icon: (APP_URL || location.origin) + '/icon.png' });
+    kit = AK.init({ projectId: WC_PROJECT_ID, mainnet: MAINNET_ENABLED, appUrl: APP_URL || location.origin, icon: (APP_URL || location.origin + '/').replace(/\/?$/, '/') + 'icon.png' });
     unwatch = kit.watch(async (a) => {
       if (a.status === 'connected' && a.address) {
         const p = await kit.provider(); if (!p) return;
