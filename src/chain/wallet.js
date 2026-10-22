@@ -14,7 +14,7 @@ if (typeof window !== 'undefined') {
   window.dispatchEvent(new Event('eip6963:requestProvider'));
 }
 export function injectedProviders() {
-  const out = eip6963.map((d) => ({ name: d.info.name, provider: d.provider }));
+  const out = eip6963.map((d) => ({ name: d.info.name, icon: d.info.icon, provider: d.provider }));
   if (!out.length && window.ethereum) out.push({ name: window.ethereum.isMetaMask ? 'MetaMask / injected' : 'Injected wallet', provider: window.ethereum });
   return out;
 }
@@ -45,7 +45,7 @@ function loadWC() {
 }
 /** @param onUri called with the wc: URI (render as QR / link) */
 export async function connectWalletConnect(onUri, preferChain) {
-  if (!WC_PROJECT_ID) throw new Error('WalletConnect needs a free projectId: set WC_PROJECT_ID in src/chain/config.js (see README).');
+  if (!WC_PROJECT_ID) throw new Error('WalletConnect isn\u2019t available here yet. Please use a browser wallet.');
   const { EthereumProvider } = await loadWC();
   const chains = availableChains(); const first = preferChain || chains[0].id;
   const rpcMap = Object.fromEntries(chains.map((c) => [c.id, c.rpc]));
@@ -70,7 +70,7 @@ function loadAppKit() {
 }
 export const appKitAvailable = () => !!WC_PROJECT_ID;
 export async function openAppKit() {
-  if (!WC_PROJECT_ID) throw new Error('The wallet modal needs a Reown projectId: set WC_PROJECT_ID in src/chain/config.js. Injected wallets below work without it.');
+  if (!WC_PROJECT_ID) throw new Error('WalletConnect isn\u2019t available here yet. Please use a browser wallet.');
   const AK = await loadAppKit();
   if (!kit) {
     kit = AK.init({ projectId: WC_PROJECT_ID, mainnet: MAINNET_ENABLED, appUrl: APP_URL || location.origin, icon: (APP_URL || location.origin) + '/icon.png' });

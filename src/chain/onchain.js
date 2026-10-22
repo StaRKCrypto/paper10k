@@ -124,13 +124,16 @@ function render() {
   // --- wallet card
   h += `<div class="ccard"><h3>Wallet</h3>`;
   if (!s.account) {
-    h += `<button class="go long" data-act="appkit">Connect wallet</button><p class="fine">MetaMask, Rabby, Coinbase / Base Account (passkeys), Phantom, OKX, Brave, Trust, Safe and 300+ wallets via WalletConnect.${W.appKitAvailable() ? '' : ' <span class="dn">Needs a Reown projectId in <code>src/chain/config.js</code>; use a browser wallet below meanwhile.</span>'}</p>`;
-    h += `<details ${W.appKitAvailable() ? '' : 'open'}><summary class="fine">Lightweight connect (no modal)</summary>`;
-    h += inj.length ? inj.map((p, i) => `<button class="go long" data-act="injected" data-i="${i}">Connect ${esc(p.name)}</button>`).join('') : `<p class="muted">No injected wallet found (install any EIP-1193 wallet such as MetaMask, Rabby, Frame).</p>`;
-    h += `<button class="ghost" data-act="wc">Connect with WalletConnect</button>`;
-    if (!WC_PROJECT_ID) h += `<p class="fine">WalletConnect is not configured on this deployment (needs a free projectId in <code>src/chain/config.js</code>). Injected wallets work without it.</p>`;
-    if (wcUri) h += `<div class="wcbox"><div id="wcqr"></div><div class="chips">${W.wcDeepLinks(wcUri).map(([n, u]) => `<a class="ghost sm" href="${esc(u)}">${esc(n)}</a>`).join('')}</div><textarea readonly rows="3">${esc(wcUri)}</textarea><p class="fine">Scan with a mobile wallet, tap your wallet on a phone, or paste the URI. This contacts the WalletConnect relay.</p></div>`;
-    h += `</details>`;
+    const wcOn = W.appKitAvailable();
+    const icon = (p) => (p.icon && /^data:image\/(svg\+xml|png|webp|jpeg);/.test(p.icon) ? `<img src="${esc(p.icon)}" alt="" width="22" height="22">` : `<span class="wi">${esc((p.name || '?')[0])}</span>`);
+    h += `<p class="wsub">Connect a wallet to trade on-chain with test tokens.</p>`;
+    if (wcOn) h += `<button class="go" data-act="appkit">Connect wallet</button><p class="fine">MetaMask, Rabby, Coinbase / Base Account, Phantom, OKX, Brave, Trust, Safe and 300+ more.</p>`;
+    h += `<div class="wlist">${inj.length ? `<div class="wlabel">${wcOn ? 'Or use a browser wallet' : 'Browser wallets'}</div>` + inj.map((p, i) => `<button class="wrow" data-act="injected" data-i="${i}">${icon(p)}<span>${esc(p.name)}</span><em>Detected</em></button>`).join('')
+      : `<div class="wempty"><b>No browser wallet found</b><p>Install a wallet extension such as MetaMask, Rabby, Coinbase Wallet, Phantom, OKX or Brave Wallet, or open this page in your mobile wallet\u2019s built-in browser.</p></div>`}</div>`;
+    if (wcOn) {
+      h += `<button class="ghost wcbtn" data-act="wc">Scan a QR code (WalletConnect)</button>`;
+      if (wcUri) h += `<div class="wcbox"><div id="wcqr"></div><div class="chips">${W.wcDeepLinks(wcUri).map(([n, u]) => `<a class="ghost sm" href="${esc(u)}">${esc(n)}</a>`).join('')}</div><textarea readonly rows="3">${esc(wcUri)}</textarea><p class="fine">Scan with a mobile wallet or tap your wallet on a phone.</p></div>`;
+    }
   } else {
     h += `<p><b>${esc(s.name)}</b> ${s.ens ? `<b class="up">${esc(s.ens)}</b> ` : ''}<code title="${esc(s.account)}">${short(s.account)}</code> <button class="ghost sm" data-act="disc">Disconnect</button>${s.kind === 'appkit' ? ' <button class="ghost sm" data-act="appkit">Wallet</button>' : ''}</p>`;
     if (c) h += `<p class="fine">${W.gaslessReady(c.id) ? '<b class="up">⛽ Gasless: trades are sponsored by the paymaster</b>' : W.batchReady(c.id) ? 'Batched transactions supported (approve + deposit in one step). You pay gas.' : `You pay gas in ${esc(c.currency.symbol)}.`}</p>`;
@@ -149,7 +152,7 @@ function render() {
   // --- balances / pool
   h += `<div class="ccard"><h3>Protocol (${c ? esc(c.short) : '—'})</h3>`;
   if (!c) h += `<p class="muted">Connect a wallet and pick a test network.</p>`;
-  else if (!d) h += `<p class="muted">No contracts deployed on ${esc(c.name)} yet. Deploy with <code>contracts/script/Deploy.s.sol</code> and add the addresses to <code>deployments.json</code> (see README → Testnet).</p>${c.faucet ? `<p class="fine">Gas faucet: <a href="${esc(c.faucet)}" target="_blank" rel="noopener">${esc(c.faucet)}</a></p>` : ''}`;
+  else if (!d) h += `<p class="muted">PAPER10K isn’t live on ${esc(c.name)} yet. Try the simulator, or read the Rules and Blog meanwhile.</p>`;
   else if (!data) h += `<p class="muted">loading…</p>`;
   else if (data.error) h += `<p class="dn">RPC error: ${esc(data.error)}</p>`;
   else {

@@ -167,3 +167,12 @@ body[data-view=blog] #landing,body[data-view=blog] #terminal,body[data-view=blog
 @media(max-width:760px){.bhero{grid-template-columns:1fr}.bcards{grid-template-columns:repeat(2,minmax(0,1fr))}.bwhy{grid-template-columns:1fr}.blog{font-size:15.5px;padding:20px 16px 48px}.btoc{top:0}}
 .blog .tblwrap{overflow-x:auto}
 .react{z-index:120}
+/* wallet card */
+.wsub{margin:0 0 6px;color:var(--mu);font-size:13.5px}
+.wlist{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.wlabel{font:600 10.5px var(--sans);text-transform:uppercase;letter-spacing:.07em;color:var(--mu);margin-top:4px}
+.wrow{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px 14px;border-radius:12px;font-weight:600}
+.wrow img,.wrow .wi{width:22px;height:22px;border-radius:6px;flex:0 0 22px}.wrow .wi{display:grid;place-items:center;background:var(--p3);font:700 12px var(--sans)}
+.wrow span{flex:1}.wrow em{font:600 11px var(--sans);font-style:normal;color:var(--g);background:#ecf8f2;border-radius:999px;padding:2px 8px}
+.wempty{border:1px dashed var(--bd2);border-radius:12px;padding:14px;background:#fcfcfa}.wempty b{display:block;margin-bottom:4px}.wempty p{margin:0;color:var(--mu);font-size:13px;line-height:1.5}
+.wcbtn{width:100%;margin-top:8px}
