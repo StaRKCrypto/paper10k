@@ -36,6 +36,7 @@ window.__P10K_APPKIT = {
       metadata: { name: 'PAPER10K', description: '10000x paper perps on Base', url: appUrl, icons: icon ? [icon] : [] },
       features: { analytics: false, email: false, socials: false, swaps: false, onramp: false, history: false, send: false },
       enableWalletConnect: true, enableInjected: true, enableEIP6963: true, enableCoinbase: true,
+      themeMode: 'light', themeVariables: { '--w3m-accent': '#111111', '--w3m-border-radius-master': '3px', '--w3m-font-family': 'Inter, ui-sans-serif, system-ui, sans-serif', '--w3m-z-index': 200 },
     });
     const cfg = adapter.wagmiConfig;
     return {
